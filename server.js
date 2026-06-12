@@ -9,7 +9,7 @@ const port = process.env.PORT || 3000;
 // THIẾT LẬP KẾT NỐI MONGODB TẠI ĐÂY
 // ==========================================
 // THAY MẬT KHẨU CỦA BẠN VÀO ĐOẠN <db_password>
-const MONGODB_URI = "mongodb+srv://Bolakiettrumtx:<Kiet280911>@cluster0.izuwm8b.mongodb.net/taixiuDB?retryWrites=true&w=majority";
+const MONGODB_URI = "mongodb+srv://Bolakiettrumtx:Kiet280911@cluster0.izuwm8b.mongodb.net/taixiuDB?retryWrites=true&w=majority";
 
 mongoose.connect(MONGODB_URI)
   .then(() => console.log('✅ Đã kết nối Cơ sở dữ liệu MongoDB thành công!'))
