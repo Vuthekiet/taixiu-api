@@ -1,6 +1,16 @@
 {
-  "name": "taixiu-api",
+  "name": "api-taixiu",
   "version": "1.0.0",
-  "scripts": { "start": "node server.js" },
-  "dependencies": { "express": "^4.18.2", "node-fetch": "^2.6.1" }
+  "description": "API Tool",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
 }
