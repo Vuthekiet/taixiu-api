@@ -2,7 +2,6 @@ const express = require('express');
 const cors = require('cors');
 const app = express();
 
-// SỬA LỖI PORT CHO RENDER
 const port = process.env.PORT || 3000;
 
 app.use(cors());
@@ -28,18 +27,23 @@ app.get('/api/taixiu', async (req, res) => {
     const ketQua = tong >= 11 ? 'Tài' : 'Xỉu';
     const diceStr = [...dices].sort((a, b) => a - b).join('');
     
-    const chuoiMD5 = latestSession.md5 || latestSession.hash || ""; 
+    // ĐÃ SỬA LỖI Ở ĐÂY: Lấy trường "_id" thay vì "md5" theo đúng API gốc của bạn
+    const chuoiMD5 = latestSession._id || ""; 
 
-    // 1. THUẬT TOÁN PHÂN TÍCH MD5
+    // 1. THUẬT TOÁN PHÂN TÍCH MD5 (Từ trường _id)
     let duDoanMD5 = "Bỏ";
-    let md5FormulaChiTiet = "Không có MD5";
+    let md5FormulaChiTiet = "Không có chuỗi mã";
     
     if (chuoiMD5.length > 0) {
+        // Lấy ký tự Đầu, Giữa, Cuối
         const charDau = chuoiMD5.charCodeAt(0);
         const charGiua = chuoiMD5.charCodeAt(Math.floor(chuoiMD5.length / 2));
         const charCuoi = chuoiMD5.charCodeAt(chuoiMD5.length - 1);
+        
+        // Tổng = 3 ký tự + Điểm phiên trước
         const tongMD5 = charDau + charGiua + charCuoi + tong;
         
+        // Chẵn = Tài, Lẻ = Xỉu
         duDoanMD5 = (tongMD5 % 2 === 0) ? "Tài" : "Xỉu";
         md5FormulaChiTiet = `ASCII(${charDau}+${charGiua}+${charCuoi}) + Điểm(${tong}) = ${tongMD5} -> ${tongMD5 % 2 === 0 ? 'Chẵn' : 'Lẻ'} = ${duDoanMD5}`;
     }
@@ -64,7 +68,7 @@ app.get('/api/taixiu', async (req, res) => {
       default: duDoanForm = "Bỏ";
     }
 
-    // 3. TỔNG HỢP
+    // 3. TỔNG HỢP LOGIC
     let duDoanCuoi = "Chưa rõ";
     let doTinCay = "0%";
     let lyDoCuoi = "";
@@ -76,7 +80,7 @@ app.get('/api/taixiu', async (req, res) => {
     } else if (duDoanForm === duDoanMD5) {
         duDoanCuoi = duDoanMD5;
         doTinCay = "85%";
-        lyDoCuoi = `ĐỘNG THUẬN: Form (${diceStr}) và MD5 đều báo ${duDoanCuoi}. (${md5FormulaChiTiet})`;
+        lyDoCuoi = `ĐỒNG THUẬN: Form (${diceStr}) và MD5 đều báo ${duDoanCuoi}. (${md5FormulaChiTiet})`;
     } else {
         duDoanCuoi = duDoanMD5;
         doTinCay = "55%";
@@ -87,7 +91,7 @@ app.get('/api/taixiu', async (req, res) => {
       id: "tool_taixiu_md5",
       Phien: latestSession.id,
       Phien_du_doan: latestSession.id + 1,
-      MD5_Chuoi: chuoiMD5 ? chuoiMD5.substring(0, 8) + "..." : "Không tìm thấy",
+      MD5_Chuoi: chuoiMD5, 
       Xuc_xac: dices.join(' - '),
       Tong_diem_phien_truoc: tong,
       Du_doan_MD5: duDoanMD5,
@@ -103,5 +107,4 @@ app.get('/api/taixiu', async (req, res) => {
   }
 });
 
-// Chạy server
 app.listen(port, () => console.log(`🚀 API đang chạy tại Port: ${port}`));
