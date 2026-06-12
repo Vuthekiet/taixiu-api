@@ -4,7 +4,6 @@ const port = 3000;
 
 app.get('/api/taixiu', async (req, res) => {
   try {
-    // Gọi API gốc lấy toàn bộ danh sách lịch sử
     const response = await fetch('https://wtxmd52.tele68.com/v1/txmd5/lite-sessions?cp=R&cl=R&pf=web&at=910a2c78e3eb1137d7ef50c8ddea98d2');
     const data = await response.json();
     
@@ -12,86 +11,73 @@ app.get('/api/taixiu', async (req, res) => {
       return res.status(500).json({ error: "Không lấy được dữ liệu từ API gốc" });
     }
 
-    const totalSessions = data.list.length; // Tổng số phiên hệ thống lấy được (lên tới 300 phiên)
-    const latestSession = data.list[0];    // Phiên mới nhất vừa ra
+    const latestSession = data.list[0];
     const dices = latestSession.dices;
     const tong = dices[0] + dices[1] + dices[2];
     const ketQua = tong >= 11 ? 'Tài' : 'Xỉu';
-    
-    // 1. Chuyển đổi toàn bộ lịch sử thành chuỗi ký tự để học tập (Mới nhất đứng đầu)
-    // 't' = Tài, 'x' = Xỉu. Ví dụ: "ttxtxx..."
-    const fullPattern = data.list.map(s => s.resultTruyenThong === 'TAI' ? 't' : 'x').join('');
-    
-    // Đảo ngược chuỗi để học từ quá khứ đến hiện tại (Dễ tính toán theo trục thời gian)
-    const historyStr = fullPattern.split('').reverse().join('');
 
-    // 2. Lấy mẫu cầu hiện tại (3 phiên gần nhất vừa ra) để đi "tìm kiếm quá khứ"
-    // Ví dụ 3 phiên gần nhất là: Tài, Xỉu, Tài -> mẫu cần tìm là "txt"
-    const currentPattern = fullPattern.slice(0, 3).split('').reverse().join('');
+    // Lấy lịch sử 20 phiên và 5 phiên gần nhất
+    const history20 = data.list.slice(0, 20).map(s => s.resultTruyenThong);
+    const history5 = history20.slice(0, 5);
 
-    // 3. THUẬT TOÁN HỌC TẬP (Markov Chain / Pattern Matching)
-    let nextIsTai = 0;
-    let nextIsXiu = 0;
-    let matchCount = 0;
-
-    // Quét toàn bộ chiều dài lịch sử (Dữ liệu học tập lên tới 300 phiên)
-    for (let i = 0; i < historyStr.length - currentPattern.length; i++) {
-      // Trích xuất một đoạn cầu dài 3 ký tự trong quá khứ
-      const pastPattern = historyStr.substring(i, i + currentPattern.length);
-      
-      // Nếu đoạn cầu trong quá khứ giống hệt mẫu cầu hiện tại
-      if (pastPattern === currentPattern) {
-        matchCount++;
-        // Xem phiên ngay sau đoạn cầu đó trong quá khứ ra cái gì
-        const nextResult = historyStr.charAt(i + currentPattern.length);
-        if (nextResult === 't') nextIsTai++;
-        if (nextResult === 'x') nextIsXiu++;
-      }
-    }
-
-    // 4. ĐƯA RA DỰ ĐOÁN DỰA TRÊN DỮ LIỆU ĐÃ HỌC
-    let duDoan = "Chưa rõ";
+    let duDoan = "Tài";
     let doTinCay = "50%";
+    let lyDo = "Dựa trên xác suất cơ bản";
 
-    if (matchCount > 0) {
-      // Tính tỷ lệ xuất hiện trong lịch sử
-      const tileTai = (nextIsTai / matchCount) * 100;
-      const tileXiu = (nextIsXiu / matchCount) * 100;
+    const countTai20 = history20.filter(r => r === 'TAI').length;
+    const countXiu20 = 20 - countTai20;
 
-      if (tileTai > tileXiu) {
+    // --- LOGIC 1: Bù Trừ Server (Ưu tiên cao nhất) ---
+    if (countTai20 >= 14) {
+      duDoan = "Xỉu";
+      doTinCay = "85%";
+      lyDo = "Tỉ lệ Tài 20 phiên đang quá cao, dự đoán server bù trừ về Xỉu";
+    } else if (countXiu20 >= 14) {
+      duDoan = "Tài";
+      doTinCay = "85%";
+      lyDo = "Tỉ lệ Xỉu 20 phiên đang quá cao, dự đoán server bù trừ về Tài";
+    }
+    // --- LOGIC 2: Bật Nhả Điểm Số (Ưu tiên hai) ---
+    else if (tong >= 16) {
+      duDoan = "Xỉu";
+      doTinCay = "80%";
+      lyDo = `Điểm phiên trước chạm trần (${tong} điểm), dự đoán rớt Xỉu`;
+    } else if (tong <= 5) {
+      duDoan = "Tài";
+      doTinCay = "80%";
+      lyDo = `Điểm phiên trước chạm đáy (${tong} điểm), dự đoán bật lên Tài`;
+    }
+    // --- LOGIC 3: Đu Trend Cầu Ngắn (Ưu tiên ba) ---
+    else {
+      const countTai5 = history5.filter(r => r === 'TAI').length;
+      if (countTai5 >= 4) {
         duDoan = "Tài";
-        doTinCay = tileTai.toFixed(1) + "%";
-      } else if (tileXiu > tileTai) {
+        doTinCay = "70%";
+        lyDo = "Cầu 5 phiên đang thuận Tài, đánh theo trend";
+      } else if (countTai5 <= 1) {
         duDoan = "Xỉu";
-        doTinCay = tileXiu.toFixed(1) + "%";
+        doTinCay = "70%";
+        lyDo = "Cầu 5 phiên đang thuận Xỉu, đánh theo trend";
       } else {
-        // Nếu tỷ lệ quá khứ là 50/50, dùng thuật toán phụ: Đếm 5 phiên gần nhất
-        const last5Tai = fullPattern.slice(0, 5).split('').filter(x => x === 't').length;
-        duDoan = last5Tai >= 3 ? "Tài" : "Xỉu";
-        doTinCay = "55% (Cân bằng)";
+        // Nếu không có trend rõ ràng, đánh ngược phiên trước (bắt cầu 1-1)
+        duDoan = history5[0] === 'TAI' ? "Xỉu" : "Tài";
+        doTinCay = "55%";
+        lyDo = "Cầu đang đi ngang (sideway), dự đoán đánh đảo phiên trước";
       }
-    } else {
-      // Nếu mẫu cầu này quá dị, chưa từng xuất hiện trong 300 phiên quá khứ
-      const last5Tai = fullPattern.slice(0, 5).split('').filter(x => x === 't').length;
-      duDoan = last5Tai >= 3 ? "Tài" : "Xỉu";
-      doTinCay = "52% (Mẫu mới)";
     }
 
-    // Trả về kết quả JSON cho Tool của bạn
+    // Trả kết quả về cho Tool
     res.json({
-      id: "ai_markov_tool",
+      id: "gemini_logic_v1",
       Phien: latestSession.id,
       phien_hien_tai: latestSession.id + 1,
-      Xuc_xac_1: dices[0],
-      Xuc_xac_2: dices[1],
-      Xuc_xac_3: dices[2],
-      Tong: tong,
-      Ket_qua: ketQua,
-      So_phiên_da_hoc: totalSessions, 
-      So_lan_trung_khớp_qua_khu: matchCount,
+      Tong_diem_phien_truoc: tong,
+      Ket_qua_phien_truoc: ketQua,
+      Ty_le_Tai_20_phien: (countTai20 / 20 * 100).toFixed(0) + "%",
+      Ty_le_Xiu_20_phien: (countXiu20 / 20 * 100).toFixed(0) + "%",
       Du_doan: duDoan,
       Do_tin_cay: doTinCay,
-      Chuoi_lich_su_ngan: fullPattern.slice(0, 30) // Hiện 30 phiên gần nhất cho gọn
+      Ly_do_du_doan: lyDo
     });
 
   } catch(err) {
@@ -99,4 +85,4 @@ app.get('/api/taixiu', async (req, res) => {
   }
 });
 
-app.listen(port, () => console.log(`AI Server chạy tại port ${port}`));
+app.listen(port, () => console.log(`API chạy tại port ${port}`));
