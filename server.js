@@ -393,4 +393,4 @@ app.get('/api/history', async (req, res) => {
     }
 });
 
-app.listen(port, () => console.log(`🚀 Server v3 chạy tại port ${port}`));
+app.listen(port, () => console.log(`🚀 Server v3 chạy tại port ${port}`)); 
