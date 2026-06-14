@@ -25,7 +25,7 @@ const historySchema = new mongoose.Schema({
     dungSai:       { type: String, default: null },
     hashId:        { type: String, default: null },
     hashAnalysis:  { type: Object, default: null },
-    hashOriginalPrediction: { type: String, default: null }, // Dự đoán gốc từ hash
+    hashOriginalPrediction: { type: String, default: null },
     timestamp:     { type: Date, default: Date.now }
 });
 const History = mongoose.model('History', historySchema);
@@ -34,298 +34,95 @@ app.use(cors());
 app.use(express.json());
 
 // ==========================================
-// BIẾN TOÀN CỤC THEO DÕI HIỆU SUẤT HASH
+// BIẾN TOÀN CỤC THEO DÕI HIỆU SUẤT
 // ==========================================
-let hashPerformance = {
+let performanceStats = {
     total: 0,
     correct: 0,
-    recentCorrect: 0,
-    recentTotal: 0,
     shouldInvert: false,
-    lastChecked: Date.now()
+    recentAccuracy: 0
 };
 
 // ==========================================
-// PHÂN TÍCH HASH CƠ BẢN
+// THUẬT TOÁN DỰ ĐOÁN LOGIC MỚI (DỰA TRÊN HASH & TREND)
 // ==========================================
-class HashAnalyzer {
-    static analyzeStructure(hashId) {
-        if (!hashId || hashId.length !== 24) return null;
+class AdvancedPredictor {
+    static analyzeHash(hashId) {
+        if (!hashId || hashId.length < 2) return null;
+        const lastByte = parseInt(hashId.substring(hashId.length - 2), 16);
+        const secondLastByte = parseInt(hashId.substring(hashId.length - 4, hashId.length - 2), 16);
         return {
-            full: hashId,
-            timestamp: hashId.substring(0, 8),
-            machine: hashId.substring(8, 14),
-            process: hashId.substring(14, 18),
-            counter: hashId.substring(18, 24),
-            byte3: parseInt(hashId.substring(18, 20), 16),
-            byte4: parseInt(hashId.substring(20, 22), 16),
-            byte5: parseInt(hashId.substring(22, 24), 16),
-            last2Chars: hashId.substring(22, 24),
+            lastByte,
+            secondLastByte,
+            parity: lastByte % 2 === 0 ? "Tài" : "Xỉu",
+            sumBytes: (lastByte + secondLastByte) % 2 === 0 ? "Tài" : "Xỉu"
         };
     }
 
-    static simplePredict(hashId) {
-        const s = this.analyzeStructure(hashId);
-        if (!s) return null;
-        // Dự đoán dựa trên parity của byte5 (chẵn -> Tài, lẻ -> Xỉu)
-        const prediction = s.byte5 % 2 === 0 ? "Tài" : "Xỉu";
+    static async getPrediction(currHash, recentResults, lastSession) {
+        const hashInfo = this.analyzeHash(currHash);
+        if (!hashInfo) return { prediction: "Bỏ", reason: "Thiếu dữ liệu Hash", confidence: 0 };
+
+        let prediction = hashInfo.parity;
+        let reason = `Dựa trên Parity Byte cuối Hash (${hashInfo.lastByte})`;
+        let confidence = 65;
+
+        // --- Kiểm tra Cầu (Trend Analysis) ---
+        const streak = this.detectStreak(recentResults);
+        if (streak && streak.length >= 3) {
+            // Nếu đang bệt, ưu tiên theo bệt nếu Hash cũng ủng hộ
+            if (streak.type === prediction) {
+                confidence += 10;
+                reason = `Cầu bệt ${streak.length} + Hash ủng hộ`;
+            } else {
+                // Nếu Hash ngược với bệt, có thể là cầu gãy hoặc Hash đang chiếm ưu thế
+                reason = `Hash (${prediction}) ngược Cầu bệt (${streak.type})`;
+                confidence = 60;
+            }
+        }
+
+        // --- Logic Tự Học (Inversion) ---
+        if (performanceStats.shouldInvert) {
+            prediction = prediction === "Tài" ? "Xỉu" : "Tài";
+            reason = `[ĐẢO NGƯỢC] ${reason}`;
+        }
+
         return {
             prediction,
-            confidence: 50,
-            reason: `Byte5 parity: ${s.byte5} (${s.byte5 % 2 === 0 ? 'chẵn' : 'lẻ'})`
+            reason,
+            confidence,
+            originalPrediction: hashInfo.parity
         };
+    }
+
+    static detectStreak(results) {
+        if (!results || results.length < 2) return null;
+        const type = results[0];
+        let length = 1;
+        for (let i = 1; i < results.length; i++) {
+            if (results[i] === type) length++;
+            else break;
+        }
+        return { type, length };
     }
 }
 
 // ==========================================
-// CẬP NHẬT HIỆU SUẤT HASH (TỰ HỌC)
+// CẬP NHẬT HIỆU SUẤT
 // ==========================================
-async function updateHashPerformance() {
+async function updatePerformance() {
     const recent = await History.find({
-        hashOriginalPrediction: { $ne: null },
-        ketQua: { $ne: null },
-        duDoan: { $ne: null }
-    })
-    .sort({ phien: -1 })
-    .limit(20)
-    .lean();
+        duDoan: { $ne: "Bỏ", $ne: null },
+        ketQua: { $ne: null }
+    }).sort({ phien: -1 }).limit(20).lean();
 
-    let correct = 0;
-    let total = 0;
-    for (const r of recent) {
-        if (r.duDoan === "Bỏ") continue;
-        total++;
-        if (r.hashOriginalPrediction === r.ketQua) correct++;
+    if (recent.length >= 5) {
+        const correct = recent.filter(r => r.duDoan === r.ketQua).length;
+        const accuracy = correct / recent.length;
+        performanceStats.recentAccuracy = accuracy;
+        performanceStats.shouldInvert = accuracy < 0.45; // Nếu tỉ lệ đúng quá thấp, tự động đảo ngược logic
+        console.log(`[PERFORMANCE] Accuracy: ${(accuracy * 100).toFixed(1)}%, Invert: ${performanceStats.shouldInvert}`);
     }
-
-    console.log(`[HASH PERFORMANCE] Đúng: ${correct}/${total} phiên gần đây`);
-    
-    if (total >= 3) { // Chỉ cần 3 phiên để đánh giá
-        const accuracy = correct / total;
-        hashPerformance.shouldInvert = (accuracy < 0.5);
-        hashPerformance.recentCorrect = correct;
-        hashPerformance.recentTotal = total;
-        console.log(`[HASH PERFORMANCE] Accuracy: ${(accuracy*100).toFixed(1)}%, Đảo ngược: ${hashPerformance.shouldInvert}`);
-    } else {
-        console.log(`[HASH PERFORMANCE] Chưa đủ mẫu (${total}/3)`);
-    }
-    hashPerformance.lastChecked = Date.now();
-}
-
-// ==========================================
-// DỰ ĐOÁN HASH CÓ TỰ ĐỘNG ĐẢO NGƯỢC
-// ==========================================
-async function getHashPrediction(currHash, prevHash) {
-    if (!currHash) return null;
-    
-    const base = HashAnalyzer.simplePredict(currHash);
-    if (!base) return null;
-
-    let confidence = base.confidence;
-    let reason = base.reason;
-    
-    if (prevHash) {
-        const prevS = HashAnalyzer.analyzeStructure(prevHash);
-        const currS = HashAnalyzer.analyzeStructure(currHash);
-        if (prevS && currS) {
-            const diff5 = currS.byte5 - prevS.byte5;
-            if (Math.abs(diff5) > 50) confidence += 10;
-            reason += ` | diff5: ${diff5}`;
-        }
-    }
-
-    let finalPrediction = base.prediction;
-    if (hashPerformance.shouldInvert) {
-        finalPrediction = finalPrediction === "Tài" ? "Xỉu" : "Tài";
-        reason = `[ĐẢO NGƯỢC] ${reason}`;
-        confidence = Math.max(confidence - 5, 50);
-    }
-
-    return {
-        prediction: finalPrediction,
-        confidence: Math.min(confidence, 80),
-        reason,
-        originalPrediction: base.prediction
-    };
-}
-
-// ==========================================
-// PHÂN TÍCH CẦU TRUYỀN THỐNG
-// ==========================================
-async function getRecentResults(limit = 30) {
-    const rows = await History.find({ ketQua: { $ne: null } })
-        .sort({ phien: -1 })
-        .limit(limit)
-        .lean();
-    return rows.map(r => r.ketQua);
-}
-
-function detectStreakCau(results) {
-    if (results.length < 3) return null;
-    const cur = results[0];
-    let streak = 1;
-    for (let i = 1; i < results.length; i++) {
-        if (results[i] === cur) streak++;
-        else break;
-    }
-    if (streak >= 3) {
-        return {
-            type: `Cầu bệt ${streak} (${cur})`,
-            duDoan: cur,
-            doTin: Math.min(50 + streak * 5, 75),
-            streak
-        };
-    }
-    return null;
-}
-
-function detect11Cau(results) {
-    if (results.length < 4) return null;
-    let isAlt = true;
-    for (let i = 0; i < 4; i++) {
-        if (results[i] === results[i + 1]) { isAlt = false; break; }
-    }
-    if (!isAlt) return null;
-    let len = 2;
-    for (let i = 1; i < results.length - 1; i++) {
-        if (results[i] !== results[i + 1]) len++;
-        else break;
-    }
-    const next = results[0] === "Tài" ? "Xỉu" : "Tài";
-    return {
-        type: `Cầu 1-1 (dài ${len})`,
-        duDoan: next,
-        doTin: Math.min(55 + len * 3, 72),
-        streak: len
-    };
-}
-
-function detect22Cau(results) {
-    if (results.length < 6) return null;
-    const ok = results[0] === results[1] && results[2] === results[3] &&
-               results[4] === results[5] && results[0] !== results[2] &&
-               results[2] !== results[4];
-    if (!ok) return null;
-    const predict = results[0] === "Tài" ? "Xỉu" : "Tài";
-    return { type: `Cầu 2-2`, duDoan: predict, doTin: 65, streak: 6 };
-}
-
-function detect33Cau(results) {
-    if (results.length < 6) return null;
-    const ok = results[0] === results[1] && results[1] === results[2] &&
-               results[3] === results[4] && results[4] === results[5] &&
-               results[0] !== results[3];
-    if (!ok) return null;
-    const predict = results[0] === "Tài" ? "Xỉu" : "Tài";
-    return { type: `Cầu 3-3`, duDoan: predict, doTin: 68, streak: 6 };
-}
-
-function detectFreqCau(results) {
-    const sample = results.slice(0, 15);
-    if (sample.length < 10) return null;
-    const tai = sample.filter(r => r === "Tài").length;
-    const xiu = sample.length - tai;
-    const ratio = tai / sample.length;
-    if (ratio >= 0.7) {
-        return { type: `Tần suất lệch (${tai}T/${xiu}X)`, duDoan: "Xỉu", doTin: 55, streak: 0 };
-    } else if (ratio <= 0.3) {
-        return { type: `Tần suất lệch (${tai}T/${xiu}X)`, duDoan: "Tài", doTin: 55, streak: 0 };
-    }
-    return null;
-}
-
-function analyzeCau(results) {
-    const detectors = [detect33Cau, detect22Cau, detectStreakCau, detect11Cau, detectFreqCau];
-    for (const fn of detectors) {
-        const result = fn(results);
-        if (result) return result;
-    }
-    return { type: "Không có cầu rõ", duDoan: "Bỏ", doTin: 0, streak: 0 };
-}
-
-// ==========================================
-// MASTER PREDICT (KẾT HỢP HASH + CẦU)
-// ==========================================
-async function masterPredict(prevHash, currHash, recentResults) {
-    const hashPred = await getHashPrediction(currHash, prevHash);
-    const cauPred = analyzeCau(recentResults);
-    
-    let finalDuDoan, finalType, finalDoTin;
-    
-    if (hashPred && cauPred.duDoan !== "Bỏ" && hashPred.prediction === cauPred.duDoan) {
-        finalDuDoan = hashPred.prediction;
-        finalDoTin = Math.max(hashPred.confidence, cauPred.doTin) + 5;
-        finalType = `Kết hợp: Hash + Cầu (${cauPred.type})`;
-    } else if (hashPred && hashPred.confidence >= 65) {
-        finalDuDoan = hashPred.prediction;
-        finalDoTin = hashPred.confidence;
-        finalType = `Hash (ưu tiên): ${hashPred.reason}`;
-    } else if (cauPred.duDoan !== "Bỏ" && cauPred.doTin >= 60) {
-        finalDuDoan = cauPred.duDoan;
-        finalDoTin = cauPred.doTin;
-        finalType = `Cầu (ưu tiên): ${cauPred.type}`;
-    } else if (hashPred) {
-        finalDuDoan = hashPred.prediction;
-        finalDoTin = hashPred.confidence;
-        finalType = `Hash (yếu): ${hashPred.reason}`;
-    } else {
-        finalDuDoan = "Bỏ";
-        finalDoTin = 0;
-        finalType = "Không đủ dữ liệu";
-    }
-
-    return {
-        duDoan: finalDuDoan,
-        doTin: Math.round(finalDoTin),
-        type: finalType,
-        hashDetails: hashPred,
-        cauDetails: cauPred,
-        hashInverted: hashPerformance.shouldInvert
-    };
-}
-
-// ==========================================
-// THỐNG KÊ
-// ==========================================
-async function getStats(limit = 50) {
-    const rows = await History.find({
-        ketQua: { $ne: null },
-        duDoan: { $ne: null }
-    })
-    .sort({ phien: -1 })
-    .limit(limit)
-    .lean();
-    
-    let total = 0, dung = 0, bo = 0;
-    let maxStreak = 0, curStreak = 0;
-    
-    for (const r of rows) {
-        if (r.duDoan === "Bỏ") { bo++; continue; }
-        total++;
-        if (r.ketQua === r.duDoan) {
-            dung++;
-            curStreak++;
-            maxStreak = Math.max(maxStreak, curStreak);
-        } else {
-            curStreak = 0;
-        }
-    }
-    
-    let streakSaiGanNhat = 0;
-    for (const r of rows) {
-        if (r.duDoan === "Bỏ") continue;
-        if (r.ketQua !== r.duDoan) streakSaiGanNhat++;
-        else break;
-    }
-    
-    return {
-        tongPhienBoQua: bo,
-        tongPhienDuDoan: total,
-        tongPhienDung: dung,
-        winrate: total > 0 ? ((dung / total) * 100).toFixed(1) : "0.0",
-        streakSaiGanNhat,
-        maxStreak
-    };
 }
 
 // ==========================================
@@ -336,148 +133,83 @@ app.get('/api/taixiu', async (req, res) => {
     try {
         const apiUrl = 'https://wtxmd52.tele68.com/v1/txmd5/lite-sessions?cp=R&cl=R&pf=web&at=910a2c78e3eb1137d7ef50c8ddea98d2';
         const response = await fetch(apiUrl);
-        if (!response.ok) return res.status(response.status).json({ error: "Lỗi API gốc" });
+        if (!response.ok) throw new Error("Lỗi API gốc");
         
         const data = await response.json();
-        if (!data?.list || data.list.length < 3) return res.status(500).json({ error: "Thiếu data" });
+        if (!data?.list || data.list.length < 2) throw new Error("Dữ liệu không đủ");
 
-        // --- Phiên vừa kết thúc ---
         const latest = data.list[0];
-        const previous = data.list[1];
         const phienVuaRa = latest.id;
         const dices = latest.dices;
-        const tong = dices[0] + dices[1] + dices[2];
+        const tong = dices.reduce((a, b) => a + b, 0);
         const ketQua = tong >= 11 ? "Tài" : "Xỉu";
         const currHash = latest._id;
-        const prevHash = previous._id;
 
-        // --- Cập nhật kết quả phiên vừa ra (KHÔNG ghi đè hashAnalysis) ---
-        const prevDoc = await History.findOne({ phien: phienVuaRa });
-        let dungSai = null;
-        if (prevDoc?.duDoan && prevDoc.duDoan !== "Bỏ") {
-            dungSai = prevDoc.duDoan === ketQua ? "Đúng" : "Sai";
-        } else if (prevDoc?.duDoan === "Bỏ") {
-            dungSai = "Bỏ";
-        }
-
+        // 1. Cập nhật kết quả phiên vừa ra
+        const lastDoc = await History.findOne({ phien: phienVuaRa });
+        let dungSai = lastDoc?.duDoan ? (lastDoc.duDoan === ketQua ? "Đúng" : "Sai") : "N/A";
+        
         await History.updateOne(
             { phien: phienVuaRa },
             { $set: { ketQua, tong, dices, dungSai, hashId: currHash } },
             { upsert: true }
         );
 
-        // --- Cập nhật hiệu suất hash ---
-        await updateHashPerformance();
+        // 2. Cập nhật hiệu suất
+        await updatePerformance();
 
-        // --- Lấy lịch sử kết quả để phân tích cầu ---
-        const recentResults = await getRecentResults(30);
-
-        // --- Dự đoán phiên tiếp theo ---
-        const prediction = await masterPredict(prevHash, currHash, recentResults);
+        // 3. Dự đoán phiên tiếp theo
+        const recentResults = (await History.find({ ketQua: { $ne: null } })
+            .sort({ phien: -1 }).limit(30).lean()).map(r => r.ketQua);
+        
+        const prediction = await AdvancedPredictor.getPrediction(currHash, recentResults, latest);
         const phienMoi = phienVuaRa + 1;
 
-        // Lưu dự đoán cho phiên mới, bao gồm originalPrediction
-        const hashStruct = HashAnalyzer.analyzeStructure(currHash);
         await History.updateOne(
             { phien: phienMoi },
             {
-                duDoan: prediction.duDoan,
-                cauPhatHien: prediction.type,
+                duDoan: prediction.prediction,
+                cauPhatHien: prediction.reason,
                 hashId: currHash,
-                hashAnalysis: hashStruct,
-                hashOriginalPrediction: prediction.hashDetails?.originalPrediction || null
+                hashOriginalPrediction: prediction.originalPrediction
             },
             { upsert: true }
         );
 
-        // --- Thống kê ---
+        // 4. Lấy thống kê
         const stats = await getStats(50);
-
-        // --- Cảnh báo ---
-        let canhBao = null;
-        if (stats.streakSaiGanNhat >= 3) {
-            canhBao = `⛔ ĐANG DÂY ĐEN ${stats.streakSaiGanNhat} phiên liên tiếp sai — KHUYÊN BỎ GAME!`;
-        }
-
-        // --- Lịch sử 10 phiên gần ---
-        const lichSu10 = await History.find({ ketQua: { $ne: null } })
-            .sort({ phien: -1 })
-            .limit(10)
-            .lean()
-            .then(rows => rows.map(r => ({
-                phien: r.phien,
-                ketQua: r.ketQua,
-                tong: r.tong,
-                duDoan: r.duDoan || "-",
-                dungSai: r.dungSai || "-",
-                byteCuoi: r.hashId ? r.hashId.substring(22, 24) : "-",
-                hashOrigPred: r.hashOriginalPrediction || "-"
-            })));
 
         res.json({
             Phien_vua_ra: phienVuaRa,
-            Ket_qua_vua_ra: ketQua,
-            Tong_xuc_xac: tong,
+            Ket_qua: ketQua,
             Dices: dices,
-            Hash_hien_tai: currHash,
-            Byte_cuoi: hashStruct?.last2Chars,
-
-            Phien_du_doan: phienMoi,
-            Cau_phat_hien: prediction.type,
-            Do_tin_cay: `${prediction.doTin}%`,
-            DU_DOAN: prediction.duDoan,
-
-            Chi_tiet_phan_tich: {
-                Hash: prediction.hashDetails ? {
-                    du_doan_goc: prediction.hashDetails.originalPrediction,
-                    du_doan_sau_dieu_chinh: prediction.hashDetails.prediction,
-                    do_tin_cay: `${prediction.hashDetails.confidence}%`,
-                    ly_do: prediction.hashDetails.reason
-                } : null,
-                Cau: prediction.cauDetails,
-                Dang_dao_nguoc_hash: hashPerformance.shouldInvert,
-                Hieu_suat_hash: `${hashPerformance.recentCorrect}/${hashPerformance.recentTotal} đúng gần đây`
-            },
-
-            Thong_ke: {
-                Tong_phien_du_doan: stats.tongPhienDuDoan,
-                Tong_phien_dung: stats.tongPhienDung,
-                Tong_phien_bo: stats.tongPhienBoQua,
-                Winrate_thuc: `${stats.winrate}%`,
-                Streak_sai_gan_nhat: stats.streakSaiGanNhat,
-                Max_streak_dung: stats.maxStreak,
-            },
-
-            Canh_bao: canhBao,
-            Lich_su_10_phien: lichSu10,
+            Phien_tiep_theo: phienMoi,
+            DU_DOAN: prediction.prediction,
+            Do_tin_cay: `${prediction.confidence}%`,
+            Ly_do: prediction.reason,
+            Thong_ke: stats
         });
 
     } catch (err) {
         console.error("Lỗi:", err);
-        res.status(500).json({ error: "Lỗi hệ thống: " + err.message });
+        res.status(500).json({ error: err.message });
     }
 });
+
+async function getStats(limit) {
+    const rows = await History.find({ ketQua: { $ne: null }, duDoan: { $ne: "Bỏ" } })
+        .sort({ phien: -1 }).limit(limit).lean();
+    const correct = rows.filter(r => r.ketQua === r.duDoan).length;
+    return {
+        total: rows.length,
+        correct,
+        winrate: rows.length > 0 ? ((correct / rows.length) * 100).toFixed(1) + "%" : "0%"
+    };
+}
 
 app.get('/api/history', async (req, res) => {
-    try {
-        const limit = parseInt(req.query.limit) || 50;
-        const rows = await History.find({ ketQua: { $ne: null } })
-            .sort({ phien: -1 })
-            .limit(limit)
-            .lean();
-        res.json(rows);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
+    const rows = await History.find().sort({ phien: -1 }).limit(50).lean();
+    res.json(rows);
 });
 
-app.delete('/api/history', async (req, res) => {
-    try {
-        await History.deleteMany({});
-        res.json({ success: true, message: "Đã xóa toàn bộ lịch sử" });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
-
-app.listen(port, () => console.log(`🚀 Server v6 chạy tại port ${port} - Tự sửa sai hash đã sửa lỗi`)); 
+app.listen(port, () => console.log(`🚀 Server v7 - Thuật toán Logic Hash & Trend chạy tại port ${port}`));
