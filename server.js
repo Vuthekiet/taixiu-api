@@ -480,4 +480,4 @@ app.delete('/api/history', async (req, res) => {
     }
 });
 
-app.listen(port, () => console.log(`🚀 Server v6 chạy tại port ${port} - Tự sửa sai hash đã sửa lỗi`));
+app.listen(port, () => console.log(`🚀 Server v6 chạy tại port ${port} - Tự sửa sai hash đã sửa lỗi`)); 
