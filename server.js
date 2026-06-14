@@ -10,7 +10,7 @@ const port = process.env.PORT || 3000;
 // ==========================================
 const MONGODB_URI = "mongodb+srv://Bolakiettrumtx:Kiet280911@cluster0.izuwm8b.mongodb.net/taixiuDB?retryWrites=true&w=majority";
 const TELEGRAM_TOKEN = "7934446128:AAHio5BnyLQXEtwpwFSaW5azYPxhuYjAFmY";
-const TELEGRAM_CHAT_ID = "8284419367"; // Bạn cần lấy Chat ID của mình, mặc định tôi để ID mẫu, bạn có thể thay đổi
+const TELEGRAM_CHAT_ID = "8284419367"; 
 
 mongoose.connect(MONGODB_URI)
   .then(() => console.log('✅ AI Database Connected!'))
@@ -28,16 +28,16 @@ const sessionSchema = new mongoose.Schema({
     duDoan:        { type: String },
     formulaUsed:   { type: String },
     isCorrect:     { type: Boolean },
+    telegramSent:  { type: Boolean, default: false },
     timestamp:     { type: Date, default: Date.now }
 });
 
-// Schema để lưu "trí thông minh" của từng công thức
 const brainSchema = new mongoose.Schema({
     formulaName:   { type: String, unique: true },
     winCount:      { type: Number, default: 0 },
     loseCount:     { type: Number, default: 0 },
-    lastResults:   [Boolean], // Lưu 20 kết quả gần nhất để tính phong độ
-    weight:        { type: Number, default: 1.0 } // Trọng số ưu tiên
+    lastResults:   [Boolean], 
+    weight:        { type: Number, default: 1.0 }
 });
 
 const Session = mongoose.model('Session', sessionSchema);
@@ -47,7 +47,7 @@ app.use(cors());
 app.use(express.json());
 
 // ==========================================
-// BỘ CÔNG THỨC DỰ ĐOÁN (CƠ SỞ DỮ LIỆU CỦA AI)
+// BỘ CÔNG THỨC DỰ ĐOÁN
 // ==========================================
 const formulas = [
     { id: "hash_parity", name: "Hash Parity", fn: (data, i) => {
@@ -85,51 +85,42 @@ async function sendTelegram(message) {
 // HỆ THỐNG TỰ HỌC (LEARNING ENGINE)
 // ==========================================
 class AILearning {
-    // Cập nhật kết quả và cho AI học từ lỗi sai
     static async learnFromPast(phien, ketQua) {
         const session = await Session.findOne({ phien });
-        if (session && session.duDoan) {
+        if (session && session.duDoan && session.isCorrect === undefined) {
             const isCorrect = session.duDoan === ketQua;
             await Session.updateOne({ phien }, { $set: { ketQua, isCorrect } });
             
-            // Cập nhật Brain cho công thức đã dùng
             const brain = await Brain.findOne({ formulaName: session.formulaUsed });
             if (brain) {
-                const update = {
-                    $inc: isCorrect ? { winCount: 1 } : { loseCount: 1 },
-                    $push: { lastResults: { $each: [isCorrect], $slice: -20 } }
-                };
-                await Brain.updateOne({ formulaName: session.formulaUsed }, update);
+                await Brain.updateOne({ formulaName: session.formulaUsed }, {
+                    <LaTex>$inc: isCorrect ? { winCount: 1 } : { loseCount: 1 },
+                    $</LaTex>push: { lastResults: { <LaTex>$each: [isCorrect], $</LaTex>slice: -20 } }
+                });
             }
         }
     }
 
-    // Chọn công thức thông minh nhất dựa trên lịch sử dài hạn
     static async getBestFormula(sessions) {
         const brains = await Brain.find();
         let bestFormula = formulas[0];
         let maxScore = -1;
 
         for (const formula of formulas) {
-            const brain = brains.find(b => b.formulaName === formula.id) || { winCount: 0, loseCount: 0, lastResults: [] };
-            
-            // Tính điểm phong độ (winrate 20 phiên gần nhất)
+            const brain = brains.find(b => b.formulaName === formula.id) || { lastResults: [] };
             const recentWins = brain.lastResults.filter(r => r === true).length;
-            const recentTotal = brain.lastResults.length;
-            const winRate = recentTotal > 0 ? recentWins / recentTotal : 0.5;
+            const winRate = brain.lastResults.length > 0 ? recentWins / brain.lastResults.length : 0.5;
             
-            // Tính điểm thử nghiệm trên 5 phiên hiện tại của API
             let currentScore = 0;
             const len = sessions.length;
             for (let j = len - 5; j < len; j++) {
                 try {
-                    if (formula.fn(sessions, j) === sessions[j].resultTruyenThong) currentScore++;
+                    const realRes = sessions[j].resultTruyenThong === "TAI" ? "Tài" : "Xỉu";
+                    if (formula.fn(sessions, j) === realRes) currentScore++;
                 } catch (e) {}
             }
 
-            // Điểm tổng hợp = (Phong độ dài hạn * 0.4) + (Đúng ngắn hạn * 0.6)
-            const totalScore = (winRate * 4) + (currentScore * 1.2);
-            
+            const totalScore = (winRate * 5) + (currentScore * 1.5);
             if (totalScore > maxScore) {
                 maxScore = totalScore;
                 bestFormula = formula;
@@ -139,7 +130,6 @@ class AILearning {
     }
 }
 
-// Khởi tạo Brain nếu chưa có
 async function initBrain() {
     for (const f of formulas) {
         await Brain.updateOne({ formulaName: f.id }, { $setOnInsert: { winCount: 0, loseCount: 0, lastResults: [] } }, { upsert: true });
@@ -158,44 +148,40 @@ app.get('/api/taixiu', async (req, res) => {
         
         if (!data?.list) throw new Error("API Error");
 
-        const sessions = data.list.reverse(); // Cũ -> Mới
+        const sessions = data.list.reverse(); 
         const latest = sessions[sessions.length - 1];
         const phienVuaRa = latest.id;
         const ketQua = latest.resultTruyenThong === "TAI" ? "Tài" : "Xỉu";
 
-        // 1. Cho AI học từ phiên vừa ra
         await AILearning.learnFromPast(phienVuaRa, ketQua);
 
-        // 2. Dự đoán phiên tiếp theo
         const { formula, score } = await AILearning.getBestFormula(sessions);
         const prediction = formula.fn(sessions, sessions.length);
         const phienMoi = phienVuaRa + 1;
 
-        // 3. Lưu dự đoán vào Session để phiên sau đối chiếu học tập
         await Session.updateOne(
             { phien: phienMoi },
             { $set: { duDoan: prediction, formulaUsed: formula.id, hashId: latest._id } },
             { upsert: true }
         );
 
-        // 4. Gửi Telegram nếu là phiên mới
-        const lastSentPhien = await Session.findOne({ phien: phienMoi, telegramSent: true });
-        if (!lastSentPhien) {
+        const checkSent = await Session.findOne({ phien: phienMoi, telegramSent: true });
+        if (!checkSent) {
             const msg = `
 🤖 *AI SELF-LEARNING V9*
 ━━━━━━━━━━━━━━━━
-🎲 Phiên vừa ra: *${phienVuaRa}*
-✅ Kết quả: *${ketQua}* (${latest.point} điểm)
+🎲 Phiên vừa ra: *<LaTex>${phienVuaRa}*
+✅ Kết quả: *$</LaTex>{ketQua}* (<LaTex>${latest.point}đ)
 ━━━━━━━━━━━━━━━━
-🔮 Dự đoán phiên: *${phienMoi}*
-🔥 Đặt cược: *${prediction.toUpperCase()}*
-🧠 Chiến thuật: \`${formula.name}\`
-📈 Độ tin cậy: \`${(score * 10).toFixed(1)}%\`
+🔮 Dự đoán phiên: *$</LaTex>{phienMoi}*
+🔥 Đặt cược: *<LaTex>${prediction.toUpperCase()}*
+🧠 Logic: \`$</LaTex>{formula.name}\`
+📈 Độ tin cậy: \`<LaTex>${Math.min(95, (score * 8)).toFixed(1)}%\`
 ━━━━━━━━━━━━━━━━
-📊 *AI đang học từ ${await Session.countDocuments({ isCorrect: { $ne: null } })} phiên dữ liệu*
+📊 *Dữ liệu đã học: $</LaTex>{await Session.countDocuments({ isCorrect: { <LaTex>$ne: null } })} phiên*
             `;
             await sendTelegram(msg);
-            await Session.updateOne({ phien: phienMoi }, { $set: { telegramSent: true } });
+            await Session.updateOne({ phien: phienMoi }, { $</LaTex>set: { telegramSent: true } });
         }
 
         res.json({
@@ -204,20 +190,17 @@ app.get('/api/taixiu', async (req, res) => {
             ket_qua: ketQua,
             du_doan_moi: prediction,
             phien_moi: phienMoi,
-            logic: formula.name
+            logic: formula.name,
+            winrate_ai: (await Session.countDocuments({ isCorrect: true }) / (await Session.countDocuments({ isCorrect: { <LaTex>$ne: null } }) || 1) * 100).toFixed(1) + "%"
         });
 
     } catch (err) {
-        console.error(err);
         res.status(500).json({ error: err.message });
     }
 });
 
-// Chạy chế độ Auto-Update mỗi 30 giây để AI tự học 24/24
 setInterval(async () => {
-    try {
-        await axios.get(`http://localhost:${port}/api/taixiu`);
-    } catch (e) {}
+    try { await axios.get(`http://localhost:$</LaTex>{port}/api/taixiu`); } catch (e) {}
 }, 30000);
 
-app.listen(port, () => console.log(`🚀 AI Self-Learning System v9 running on port ${port}`));
+app.listen(port, () => console.log(`🚀 AI v9 running on port ${port}`));
