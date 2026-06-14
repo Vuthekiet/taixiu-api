@@ -172,4 +172,4 @@ app.get("/api/taixiu", async (req, res) => {
     }
 });
 
-app.listen(port, () => console.log(`🚀 AI v9.2 Ultra - 90% Accuracy running on port ${port}`));
+app.listen(port, () => console.log(`🚀 AI v9.2 Ultra - 90% Accuracy running on port ${port}`)); 
