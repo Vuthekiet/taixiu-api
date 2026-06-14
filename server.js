@@ -32,57 +32,90 @@ app.use(cors());
 app.use(express.json());
 
 // ==========================================
-// AI CORE: THUẬT TOÁN 90% (NODE.JS VERSION)
+// AI CORE: THUẬT TOÁN CẢI TIẾN (NODE.JS VERSION)
 // ==========================================
 
-// 1. Markov Chain Logic (Xác suất chuỗi)
+// 1. Markov Chain Logic (Xác suất chuỗi) - Cải tiến
 function getMarkovPrediction(sessions) {
     if (sessions.length < 6) return null;
     const historyStr = sessions.map(s => s.resultTruyenThong === "TAI" ? "T" : "X").join("");
-    const currentState = historyStr.slice(-3); // Chuỗi 3 phiên gần nhất
     
-    const tCount = (historyStr.match(new RegExp(currentState + "T", "g")) || []).length;
-    const xCount = (historyStr.match(new RegExp(currentState + "X", "g")) || []).length;
+    if (historyStr.length < 4) return null;
     
-    if (tCount > xCount) return { pred: "Tài", conf: (tCount / (tCount + xCount)) * 100 };
-    if (xCount > tCount) return { pred: "Xỉu", conf: (xCount / (tCount + xCount)) * 100 };
+    const currentState = historyStr.slice(-4); // Chuỗi 4 phiên gần nhất
+    
+    let tCount = 0;
+    let xCount = 0;
+    
+    for (let i = 0; i < historyStr.length - 4; i++) {
+        if (historyStr.substring(i, i + 4) === currentState) {
+            if (i + 4 < historyStr.length) {
+                if (historyStr[i+4] === 'T') {
+                    tCount++;
+                } else if (historyStr[i+4] === 'X') {
+                    xCount++;
+                }
+            }
+        }
+    }
+    
+    const totalCount = tCount + xCount;
+    if (totalCount === 0) return null;
+    
+    if (tCount > xCount) {
+        return { pred: "Tài", conf: (tCount / totalCount) * 100 };
+    } else if (xCount > tCount) {
+        return { pred: "Xỉu", conf: (xCount / totalCount) * 100 };
+    }
     return null;
 }
 
-// 2. Delta Hash Logic (Vị trí trọng yếu)
+// 2. Delta Hash Logic (Vị trí trọng yếu) - Cải tiến
 function getDeltaHashPrediction(sessions) {
+    if (!sessions || sessions.length === 0) return null;
     const latest = sessions[sessions.length - 1];
     const h = latest._id;
-    // Soi các vị trí Hex: 5, 10, 15, 20, 25, 30
-    const indices = [5, 10, 15, 20, 25, 30];
+    
+    // Combined from user's and analysis
+    const indices = [0, 1, 2, 3, 5, 10, 12, 15, 20, 21, 22, 23]; 
+    
     let val = 0;
-    indices.forEach(i => { val += parseInt(h[i], 16); });
+    for (const i of indices) {
+        if (i < h.length) {
+            val += parseInt(h[i], 16);
+        }
+    }
+    
     return val % 2 === 0 ? "Tài" : "Xỉu";
 }
 
-// 3. Pattern Recognition (Cầu Bệt/Nghiêng)
+// 3. Pattern Recognition (Cầu Bệt/Nghiêng) - Cải tiến
 function getPatternPrediction(sessions) {
+    if (sessions.length < 5) return null;
     const last5 = sessions.slice(-5).map(s => s.resultTruyenThong === "TAI" ? "T" : "X");
     const lastRes = last5[last5.length - 1];
     
-    // Cầu bệt
+    // Cầu bệt (Streak)
     let streak = 0;
     for (let i = last5.length - 1; i >= 0; i--) {
         if (last5[i] === lastRes) streak++; else break;
     }
-    if (streak >= 3) return { pred: lastRes === "T" ? "Tài" : "Xỉu", conf: 85 };
     
-    // Cầu nghiêng
+    if (streak >= 3) { // If a streak of 3 or more, predict continuation
+        return { pred: lastRes === "T" ? "Tài" : "Xỉu", conf: 85 };
+    }
+    
+    // Cầu nghiêng (Bias)
     const tCount = last5.filter(x => x === "T").length;
+    const xCount = last5.filter(x => x === "X").length;
+    
     if (tCount >= 4) return { pred: "Xỉu", conf: 75 }; // Nghiêng Tài -> Đánh Xỉu
-    if (tCount <= 1) return { pred: "Tài", conf: 75 }; // Nghiêng Xỉu -> Đánh Tài
+    if (xCount >= 4) return { pred: "Tài", conf: 75 }; // Nghiêng Xỉu -> Đánh Tài
     
     return null;
 }
 
-// ==========================================
-// HỆ THỐNG ĐIỀU PHỐI (ULTRA VOTING)
-// ==========================================
+// HỆ THỐNG ĐIỀU PHỐI (ULTRA VOTING) - Cải tiến
 async function getUltraPrediction(sessions) {
     const markov = getMarkovPrediction(sessions);
     const delta = getDeltaHashPrediction(sessions);
@@ -91,29 +124,49 @@ async function getUltraPrediction(sessions) {
     let taiWeight = 0;
     let xiuWeight = 0;
 
-    // Trọng số Markov (3.0)
+    // Trọng số Markov (3.5) - Tăng trọng số
     if (markov) {
-        if (markov.pred === "Tài") taiWeight += 3 * (markov.conf / 100);
-        else xiuWeight += 3 * (markov.conf / 100);
+        if (markov.pred === "Tài") taiWeight += 3.5 * (markov.conf / 100);
+        else xiuWeight += 3.5 * (markov.conf / 100);
     }
 
-    // Trọng số Delta Hash (2.0)
-    if (delta === "Tài") taiWeight += 2;
-    else xiuWeight += 2;
+    // Trọng số Delta Hash (3.0) - Tăng trọng số
+    if (delta === "Tài") taiWeight += 3.0;
+    else xiuWeight += 3.0;
 
     // Trọng số Pattern (2.5)
     if (pattern) {
         if (pattern.pred === "Tài") taiWeight += 2.5 * (pattern.conf / 100);
         else xiuWeight += 2.5 * (pattern.conf / 100);
     }
+    
+    // Logic bổ sung: "Điểm rơi" (Drop points) dựa trên tổng xúc xắc hiện tại
+    if (sessions.length > 0) {
+        const currentSession = sessions[sessions.length - 1];
+        if (currentSession.dices && currentSession.dices.length > 0) {
+            const currentSum = currentSession.dices.reduce((a, b) => a + b, 0);
+            if (currentSum === 5) { 
+                taiWeight += 1.0; 
+            } else if (currentSum === 16) { 
+                taiWeight += 1.0; 
+            } else if (currentSum === 6) { 
+                xiuWeight += 1.0;
+            } else if (currentSum === 8) { 
+                xiuWeight += 1.0;
+            } else if (currentSum === 9) { 
+                xiuWeight += 1.0;
+            }
+        }
+    }
 
     const finalPred = taiWeight >= xiuWeight ? "Tài" : "Xỉu";
-    const confidence = (Math.max(taiWeight, xiuWeight) / (taiWeight + xiuWeight)) * 100;
+    const totalWeight = taiWeight + xiuWeight;
+    const confidence = totalWeight > 0 ? (Math.max(taiWeight, xiuWeight) / totalWeight) * 100 : 50;
 
     return {
         prediction: finalPred,
         confidence: confidence.toFixed(1),
-        logic: `Markov(${markov?.pred || 'N/A'}), Hash(${delta}), Pattern(${pattern?.pred || 'N/A'})`
+        logic: `Markov(${markov?.pred || 'N/A'}), Hash(${delta}), Pattern(${pattern?.pred || 'N/A'}), Sum(${sessions.length > 0 && sessions[sessions.length - 1].dices ? sessions[sessions.length - 1].dices.reduce((a, b) => a + b, 0) : 'N/A'})`
     };
 }
 
@@ -171,4 +224,4 @@ app.get('/api/taixiu', async (req, res) => {
     }
 });
 
-app.listen(port, () => console.log(`🚀 AI v9.2 Ultra - 90% Accuracy running on port ${port}`)); 
+app.listen(port, () => console.log(`🚀 AI v9.2 Ultra - 90% Accuracy running on port ${port}`));
