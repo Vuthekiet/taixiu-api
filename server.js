@@ -52,6 +52,9 @@ async function getUltraPrediction(sessions) {
     let taiWeight = 0;
     let xiuWeight = 0;
 
+    let last3 = []; // Declare with default empty array
+    let last2 = []; // Declare with default empty array
+
     // --- Rule 1: Điểm Rơi Xúc Xắc (Strongest signals) ---
     if (prevSum === 11) { 
         taiWeight += 3.0; 
@@ -64,8 +67,8 @@ async function getUltraPrediction(sessions) {
     // --- Rule 2: Sequence Patterns (Cầu) ---
     if (sessions.length >= 3) {
         const historyResults = sessions.map(s => s.resultTruyenThong);
-        let last3 = historyResults.slice(-3);
-        let last2 = historyResults.slice(-2);
+        last3 = historyResults.slice(-3);
+        last2 = historyResults.slice(-2);
         
         // Cầu Bệt (Streak)
         if (last3[0] === "TAI" && last3[1] === "TAI" && last3[2] === "TAI") { 
@@ -172,4 +175,4 @@ app.get("/api/taixiu", async (req, res) => {
     }
 });
 
-app.listen(port, () => console.log(`🚀 AI v9.2 Ultra - 90% Accuracy running on port ${port}`)); 
+app.listen(port, () => console.log(`🚀 AI v9.2 Ultra - 90% Accuracy running on port ${port}`));
