@@ -32,92 +32,83 @@ app.use(cors());
 app.use(express.json());
 
 // ==========================================
-// AI CORE: THUẬT TOÁN CẢI TIẾN V2 (NODE.JS VERSION)
+// AI CORE: THUẬT TOÁN TỰ ĐIỀU CHỈNH (NODE.JS VERSION)
 // ==========================================
 
+function getRules(historyItem) {
+    const sid = historyItem.id;
+    const h = historyItem._id;
+    const sumVal = historyItem.point;
+    
+    // Calculate h_seed from hash
+    let hSeed = 0;
+    for (let i = 0; i < h.length; i += 2) {
+        if (i + 1 < h.length) {
+            hSeed += parseInt(h.substring(i, i + 2), 16);
+        }
+    }
+
+    return {
+        chaos: (sid ^ hSeed) % 2 === 0 ? "Tài" : "Xỉu",
+        sumParity: sumVal % 2 === 0 ? "Tài" : "Xỉu",
+        idParity: sid % 2 === 0 ? "Tài" : "Xỉu",
+        fixedTai: "Tài",
+        fixedXiu: "Xỉu"
+    };
+}
+
 async function getUltraPrediction(sessions) {
-    if (!sessions || sessions.length === 0) {
+    if (!sessions || sessions.length < 10) { // Need at least 10 sessions for self-correction
         return {
-            prediction: "Tài", // Default if no history
+            prediction: "Tài", // Default if not enough history
             confidence: "50.0",
-            logic: "N/A"
+            logic: "Not enough history for adaptive prediction"
         };
     }
     
-    const latest = sessions[sessions.length - 1];
-    const prevSum = latest.point;
-    const has1Prev = latest.dices.includes(1);
-    const h = latest._id;
+    const currentSession = sessions[sessions.length - 1];
     
-    let taiWeight = 0;
-    let xiuWeight = 0;
-
-    let last3 = []; // Declare with default empty array
-    let last2 = []; // Declare with default empty array
-
-    // --- Rule 1: Điểm Rơi Xúc Xắc (Strongest signals) ---
-    if (prevSum === 11) { 
-        taiWeight += 3.0; 
-    } else if ([5, 9, 12, 14, 15, 17].includes(prevSum)) { 
-        xiuWeight += 3.0; 
-    } else if (prevSum === 8 || prevSum === 10) { 
-        taiWeight += 1.5; 
-    }
+    // Evaluate rules on recent history (last 5 sessions for scoring)
+    const ruleScores = {
+        chaos: 0,
+        sumParity: 0,
+        idParity: 0,
+        fixedTai: 0,
+        fixedXiu: 0
+    };
     
-    // --- Rule 2: Sequence Patterns (Cầu) ---
-    if (sessions.length >= 3) {
-        const historyResults = sessions.map(s => s.resultTruyenThong);
-        last3 = historyResults.slice(-3);
-        last2 = historyResults.slice(-2);
-        
-        // Cầu Bệt (Streak)
-        if (last3[0] === "TAI" && last3[1] === "TAI" && last3[2] === "TAI") { 
-            xiuWeight += 2.0; // Bẻ cầu bệt Tài (predict reversal)
-        } else if (last3[0] === "XIU" && last3[1] === "XIU" && last3[2] === "XIU") { 
-            taiWeight += 2.0; // Bẻ cầu bệt Xỉu (predict reversal)
-        }
-        
-        // Cầu 1-1 (Alternating)
-        if (last2[0] === "TAI" && last2[1] === "XIU") { 
-            taiWeight += 1.0;
-        } else if (last2[0] === "XIU" && last2[1] === "TAI") { 
-            xiuWeight += 1.0;
+    for (let i = sessions.length - 6; i < sessions.length - 1; i++) { // Check last 5 completed sessions
+        const historyItem = sessions[i];
+        const actualResult = sessions[i+1].resultTruyenThong === "TAI" ? "Tài" : "Xỉu";
+        const rules = getRules(historyItem);
+
+        for (const ruleName in rules) {
+            if (rules[ruleName] === actualResult) {
+                ruleScores[ruleName]++;
+            }
         }
     }
-            
-    // --- Rule 3: Presence of '1' in previous dices ---
-    if (has1Prev) { 
-        taiWeight += 1.0; 
-    } else { 
-        xiuWeight += 0.5; 
+    
+    // Pick the best performing rule
+    let bestRule = "fixedTai"; // Default best rule
+    let maxScore = -1;
+    for (const ruleName in ruleScores) {
+        if (ruleScores[ruleName] > maxScore) {
+            maxScore = ruleScores[ruleName];
+            bestRule = ruleName;
+        }
     }
 
-    // --- Rule 4: Hash A vs F (Weak signal, but can be tie-breaker) ---
-    const countA = (h.match(/a/g) || []).length;
-    const countF = (h.match(/f/g) || []).length;
-    if (countA > countF) { 
-        taiWeight += 0.5;
-    } else if (countF > countA) { 
-        xiuWeight += 0.5;
-    }
+    // Apply the best rule to the current session to get the prediction for the next session
+    const currentRules = getRules(currentSession);
+    const finalPred = currentRules[bestRule];
 
-    let finalPred;
-    if (taiWeight > xiuWeight) {
-        finalPred = "Tài";
-    } else if (xiuWeight > taiWeight) {
-        finalPred = "Xỉu";
-    } else {
-        // If tied, default to Tài (can be adjusted)
-        finalPred = "Tài";
-    }
-
-    const totalWeight = taiWeight + xiuWeight;
-    const confidence = totalWeight > 0 ? (Math.max(taiWeight, xiuWeight) / totalWeight) * 100 : 50;
+    const confidence = (maxScore / 5) * 100; // Confidence based on best rule's recent accuracy
 
     return {
         prediction: finalPred,
         confidence: confidence.toFixed(1),
-        logic: `Sum(${prevSum}), Has1(${has1Prev}), Seq(${last3.length > 0 ? last3.join("-") : "N/A"}), HashAF(${countA}-${countF})`
+        logic: `Adaptive: Best rule is ${bestRule} (Accuracy: ${confidence.toFixed(1)}%)`
     };
 }
 
