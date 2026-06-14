@@ -35,12 +35,18 @@ app.use(express.json());
 // BỘ THUẬT TOÁN LOGIC ĐA DẠNG
 // ==========================================
 const formulas = [
-    { name: "Hash Parity", fn: (data, i) => parseInt(data[i]._id.slice(-2), 16) % 2 === 0 ? "Tài" : "Xỉu" },
+    { name: "Hash Parity", fn: (data, i) => {
+        const target = data[i] || data[i-1]; // Nếu i chưa có (phiên mới), dùng i-1
+        return parseInt(target._id.slice(-2), 16) % 2 === 0 ? "Tài" : "Xỉu";
+    }},
     { name: "Point Parity", fn: (data, i) => data[i-1].point % 2 === 0 ? "Tài" : "Xỉu" },
-    { name: "Bridge 1-1", fn: (data, i) => data[i-1].resultTruyenThong === "Tài" ? "Xỉu" : "Tài" },
+    { name: "Bridge 1-1", fn: (data, i) => data[i-1].resultTruyenThong === "TAI" ? "Xỉu" : "Tài" },
     { name: "Sum Prev Points", fn: (data, i) => (data[i-1].point + data[i-2].point) % 2 === 0 ? "Tài" : "Xỉu" },
     { name: "MD5 Rule", fn: (data, i) => (data[i-1].dices[0] + data[i-1].dices[1] + data[i-1].dices[2]) % 2 === 0 ? "Tài" : "Xỉu" },
-    { name: "Hash Bridge", fn: (data, i) => (parseInt(data[i]._id.slice(-2), 16) + data[i-1].point) % 2 === 0 ? "Tài" : "Xỉu" },
+    { name: "Hash Bridge", fn: (data, i) => {
+        const target = data[i] || data[i-1];
+        return (parseInt(target._id.slice(-2), 16) + data[i-1].point) % 2 === 0 ? "Tài" : "Xỉu";
+    }},
     { name: "Trend Inversion", fn: (data, i) => data[i-1].point > 10 ? "Xỉu" : "Tài" }
 ];
 
@@ -71,8 +77,20 @@ async function getDynamicPrediction(sessions) {
     }
 
     // Dự đoán cho phiên tiếp theo (phiên đang chờ)
-    // Lưu ý: Phiên tiếp theo chưa có trong list, hoặc là phiên mới nhất trong list nếu list chứa phiên đang chờ
-    const prediction = bestFormula.fn(sessions, len); // Giả định len là index cho phiên mới
+    // Lưu ý: Trong API MD5, phiên đang chờ (đang đặt cược) thường chưa có Hash hoàn chỉnh hoặc chưa có trong list.
+    // Tuy nhiên, các công thức của chúng ta chủ yếu dựa trên dữ liệu phiên trước (N-1).
+    // Vì vậy, để dự đoán cho phiên mới (len), chúng ta truyền mảng sessions hiện tại vào.
+    
+    let prediction = "Bỏ";
+    try {
+        // Một số công thức cần truy cập sessions[i], một số cần sessions[i-1]
+        // Ở đây i = len (phiên mới), nên i-1 là latest (phiên vừa ra)
+        prediction = bestFormula.fn(sessions, len);
+    } catch (e) {
+        console.error("Lỗi khi chạy công thức dự đoán:", e.message);
+        // Fallback: Nếu công thức cần Hash phiên hiện tại (chưa có), ta dùng kết quả phiên trước
+        prediction = sessions[len-1].resultTruyenThong === "TAI" ? "Tài" : "Xỉu";
+    }
     
     return {
         prediction,
