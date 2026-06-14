@@ -1,17 +1,16 @@
 {
-  "name": "api-taixiu-pro",
-  "version": "2.0.0",
-  "description": "API Tool Pro tích hợp AI & MongoDB",
+  "name": "taixiu-api",
+  "version": "1.0.0",
+  "description": "AI Tai Xiu Prediction API v9.2 Ultra",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "dev": "nodemon server.js"
   },
   "dependencies": {
+    "axios": "^1.6.0",
     "cors": "^2.8.5",
-    "express": "^4.19.2",
+    "express": "^4.18.2",
     "mongoose": "^8.0.0"
-  },
-  "engines": {
-    "node": ">=18.0.0"
   }
 }
