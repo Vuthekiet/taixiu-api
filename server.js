@@ -33,15 +33,21 @@ app.use(cors());
 app.use(express.json());
 
 // ==========================================
-// PHÂN TÍCH HASH - THUẬT TOÁN CHÍNH
+// BIẾN TOÀN CỤC THEO DÕI ĐỘ CHÍNH XÁC HASH
 // ==========================================
+let hashPerformance = {
+    total: 0,
+    correct: 0,
+    recentCorrect: 0,
+    recentTotal: 0,
+    shouldInvert: false, // Tự động đảo ngược nếu accuracy thấp
+    lastChecked: Date.now()
+};
 
+// ==========================================
+// PHÂN TÍCH HASH CƠ BẢN (CHỈ LẤY ĐẶC TRƯNG)
+// ==========================================
 class HashAnalyzer {
-    /**
-     * Phân tích cấu trúc hash
-     * Hash format: 24 ký tự hex (MongoDB ObjectId style)
-     * Timestamp(8) + Machine(6) + Process(4) + Counter(6)
-     */
     static analyzeStructure(hashId) {
         if (!hashId || hashId.length !== 24) return null;
         return {
@@ -50,264 +56,109 @@ class HashAnalyzer {
             machine: hashId.substring(8, 14),
             process: hashId.substring(14, 18),
             counter: hashId.substring(18, 24),
-            // Các byte quan trọng cho dự đoán
-            byte3: parseInt(hashId.substring(18, 20), 16), // Counter byte 1
-            byte4: parseInt(hashId.substring(20, 22), 16), // Counter byte 2
-            byte5: parseInt(hashId.substring(22, 24), 16), // Counter byte 3 (QUAN TRỌNG NHẤT)
+            byte3: parseInt(hashId.substring(18, 20), 16),
+            byte4: parseInt(hashId.substring(20, 22), 16),
+            byte5: parseInt(hashId.substring(22, 24), 16),
             last2Chars: hashId.substring(22, 24),
-            last3Chars: hashId.substring(21, 24),
         };
     }
 
-    /**
-     * Dự đoán từ 1 hash đơn
-     * Quy luật phát hiện: byte cuối quyết định kết quả
-     */
-    static predictFromSingle(hashId) {
-        const structure = this.analyzeStructure(hashId);
-        if (!structure) return null;
-
-        const { byte3, byte4, byte5 } = structure;
-        
-        // TÍNH TOÁN CÁC CHỈ SỐ
-        const sumBytes = byte3 + byte4 + byte5;
-        const xorBytes = byte3 ^ byte4 ^ byte5;
-        const avgBytes = sumBytes / 3;
-        const maxByte = Math.max(byte3, byte4, byte5);
-        const minByte = Math.min(byte3, byte4, byte5);
-        const range = maxByte - minByte;
-        
-        // CÔNG THỨC DỰ ĐOÁN CHÍNH
-        let prediction = null;
-        let confidence = 0;
-        let reason = "";
-        
-        // Pattern 1: Byte5 extreme (< 30 hoặc > 220) -> XIU
-        if (byte5 < 30 || byte5 > 220) {
-            prediction = "Xỉu";
-            confidence = 80;
-            reason = `Byte5 extreme: ${byte5}`;
-        }
-        // Pattern 2: Byte5 trong khoảng 100-180 -> TAI
-        else if (byte5 >= 100 && byte5 <= 180) {
-            prediction = "Tài";
-            confidence = 75;
-            reason = `Byte5 mid-range: ${byte5}`;
-        }
-        // Pattern 3: Tổng 3 byte chẵn và byte5 lẻ -> TAI
-        else if (sumBytes % 2 === 0 && byte5 % 2 === 1) {
-            prediction = "Tài";
-            confidence = 70;
-            reason = `Sum chẵn & Byte5 lẻ`;
-        }
-        // Pattern 4: XOR < 100 -> TAI
-        else if (xorBytes < 100) {
-            prediction = "Tài";
-            confidence = 65;
-            reason = `XOR thấp: ${xorBytes}`;
-        }
-        // Pattern 5: Range > 150 -> XIU
-        else if (range > 150) {
-            prediction = "Xỉu";
-            confidence = 60;
-            reason = `Range lớn: ${range}`;
-        }
-        // Pattern 6: Trung bình > 150 -> TAI
-        else if (avgBytes > 150) {
-            prediction = "Tài";
-            confidence = 55;
-            reason = `Avg cao: ${avgBytes.toFixed(1)}`;
-        }
-        // Default
-        else {
-            prediction = byte5 % 2 === 0 ? "Tài" : "Xỉu";
-            confidence = 50;
-            reason = `Default parity`;
-        }
-
+    // Hàm dự đoán đơn giản từ 1 hash, dùng byte5 mod 2 (tạm thời)
+    static simplePredict(hashId) {
+        const s = this.analyzeStructure(hashId);
+        if (!s) return null;
+        // Dự đoán dựa trên parity của byte5 (chẵn -> Tài, lẻ -> Xỉu) 
+        // Đây là công thức khởi đầu, sẽ được điều chỉnh bởi cơ chế học
+        const prediction = s.byte5 % 2 === 0 ? "Tài" : "Xỉu";
         return {
             prediction,
-            confidence,
-            reason,
-            details: {
-                byte3, byte4, byte5,
-                sumBytes, xorBytes, avgBytes: Math.round(avgBytes),
-                range, maxByte, minByte
-            }
-        };
-    }
-
-    /**
-     * Dự đoán từ cặp hash (CHÍNH XÁC HƠN)
-     * So sánh sự thay đổi giữa 2 hash liên tiếp
-     */
-    static predictFromPair(prevHash, currHash) {
-        const prev = this.analyzeStructure(prevHash);
-        const curr = this.analyzeStructure(currHash);
-        
-        if (!prev || !curr) return null;
-
-        // Sự thay đổi các byte
-        const diff3 = curr.byte3 - prev.byte3;
-        const diff4 = curr.byte4 - prev.byte4;
-        const diff5 = curr.byte5 - prev.byte5; // QUAN TRỌNG NHẤT
-        const sumDiff = (curr.byte3 + curr.byte4 + curr.byte5) - 
-                       (prev.byte3 + prev.byte4 + prev.byte5);
-        
-        // Phân tích đơn lẻ
-        const prevAnalysis = this.predictFromSingle(prevHash);
-        const currAnalysis = this.predictFromSingle(currHash);
-        
-        let prediction = null;
-        let confidence = 0;
-        let reason = "";
-        
-        // CÔNG THỨC DỰ ĐOÁN TỪ CẶP
-        // Pattern A: diff5 giảm mạnh (< -40) -> XIU
-        if (diff5 < -40) {
-            prediction = "Xỉu";
-            confidence = 85;
-            reason = `Byte5 giảm mạnh: ${diff5}`;
-        }
-        // Pattern B: diff5 tăng mạnh (> 40) -> TAI
-        else if (diff5 > 40) {
-            prediction = "Tài";
-            confidence = 85;
-            reason = `Byte5 tăng mạnh: ${diff5}`;
-        }
-        // Pattern C: diff5 trong khoảng 10-40 -> TAI
-        else if (diff5 > 10 && diff5 <= 40) {
-            prediction = "Tài";
-            confidence = 75;
-            reason = `Byte5 tăng vừa: ${diff5}`;
-        }
-        // Pattern D: diff5 trong khoảng -40 đến -10 -> XIU
-        else if (diff5 < -10 && diff5 >= -40) {
-            prediction = "Xỉu";
-            confidence = 75;
-            reason = `Byte5 giảm vừa: ${diff5}`;
-        }
-        // Pattern E: diff5 gần 0 (±10) -> Đảo chiều
-        else if (Math.abs(diff5) <= 10) {
-            prediction = prevAnalysis.prediction === "Tài" ? "Xỉu" : "Tài";
-            confidence = 70;
-            reason = `Byte5 ổn định, đảo chiều`;
-        }
-        // Pattern F: Dựa vào sumDiff
-        else if (sumDiff > 50) {
-            prediction = "Tài";
-            confidence = 65;
-            reason = `Tổng tăng: ${sumDiff}`;
-        }
-        else if (sumDiff < -50) {
-            prediction = "Xỉu";
-            confidence = 65;
-            reason = `Tổng giảm: ${sumDiff}`;
-        }
-        // Fallback
-        else {
-            prediction = currAnalysis.prediction;
-            confidence = currAnalysis.confidence - 5;
-            reason = `Fallback: ${currAnalysis.reason}`;
-        }
-
-        return {
-            prediction,
-            confidence,
-            reason,
-            prev: prevAnalysis,
-            curr: currAnalysis,
-            diffs: { diff3, diff4, diff5, sumDiff }
-        };
-    }
-
-    /**
-     * Học từ lịch sử để cải thiện dự đoán
-     */
-    static async learnFromHistory(limit = 50) {
-        const history = await History.find({
-            hashId: { $ne: null },
-            ketQua: { $ne: null }
-        })
-        .sort({ phien: -1 })
-        .limit(limit)
-        .lean();
-
-        if (history.length < 10) return { patterns: {}, totalSamples: 0 };
-
-        const patterns = {};
-        let correctPredictions = 0;
-        let totalPredictions = 0;
-
-        // Phân tích từng cặp
-        for (let i = 0; i < history.length - 1; i++) {
-            const curr = history[i];
-            const prev = history[i + 1];
-            
-            if (!curr.hashId || !prev.hashId) continue;
-
-            const analysis = this.predictFromPair(prev.hashId, curr.hashId);
-            if (!analysis) continue;
-
-            // Tạo key cho pattern
-            const diff5Range = analysis.diffs.diff5;
-            let rangeKey;
-            if (diff5 < -40) rangeKey = "giảm_mạnh";
-            else if (diff5 < -10) rangeKey = "giảm_vừa";
-            else if (diff5 <= 10) rangeKey = "ổn_định";
-            else if (diff5 <= 40) rangeKey = "tăng_vừa";
-            else rangeKey = "tăng_mạnh";
-
-            if (!patterns[rangeKey]) {
-                patterns[rangeKey] = {
-                    total: 0,
-                    correct: 0,
-                    predictedTai: 0,
-                    predictedXiu: 0,
-                    actualTai: 0,
-                    actualXiu: 0
-                };
-            }
-
-            patterns[rangeKey].total++;
-            totalPredictions++;
-            
-            if (analysis.prediction === curr.ketQua) {
-                patterns[rangeKey].correct++;
-                correctPredictions++;
-            }
-
-            if (analysis.prediction === "Tài") patterns[rangeKey].predictedTai++;
-            else patterns[rangeKey].predictedXiu++;
-            
-            if (curr.ketQua === "Tài") patterns[rangeKey].actualTai++;
-            else patterns[rangeKey].actualXiu++;
-        }
-
-        // Tính tỉ lệ cho từng pattern
-        Object.keys(patterns).forEach(key => {
-            patterns[key].accuracy = patterns[key].total > 0 
-                ? ((patterns[key].correct / patterns[key].total) * 100).toFixed(1) 
-                : 0;
-            patterns[key].weight = patterns[key].accuracy / 100;
-        });
-
-        return {
-            patterns,
-            totalSamples: totalPredictions,
-            overallAccuracy: totalPredictions > 0 
-                ? ((correctPredictions / totalPredictions) * 100).toFixed(1) 
-                : 0,
-            correctPredictions,
-            totalPredictions
+            confidence: 50,
+            reason: `Byte5 parity: ${s.byte5} (${s.byte5 % 2 === 0 ? 'chẵn' : 'lẻ'})`
         };
     }
 }
 
 // ==========================================
-// PHÂN TÍCH CẦU (GIỮ NGUYÊN + CẢI TIẾN)
+// CẬP NHẬT HIỆU SUẤT HASH (TỰ HỌC)
 // ==========================================
+async function updateHashPerformance() {
+    // Lấy 20 phiên gần nhất có hash và kết quả
+    const recent = await History.find({
+        hashId: { $ne: null },
+        ketQua: { $ne: null },
+        duDoan: { $ne: null }
+    })
+    .sort({ phien: -1 })
+    .limit(20)
+    .lean();
 
+    let correct = 0;
+    let total = 0;
+    for (const r of recent) {
+        if (r.duDoan === "Bỏ") continue;
+        // Lấy dự đoán hash gốc từ hashAnalysis (nếu có)
+        if (r.hashAnalysis?.originalPrediction) {
+            total++;
+            if (r.hashAnalysis.originalPrediction === r.ketQua) correct++;
+        }
+    }
+
+    if (total > 0) {
+        const accuracy = correct / total;
+        // Nếu accuracy < 50% và có ít nhất 5 mẫu -> đảo ngược
+        hashPerformance.shouldInvert = (accuracy < 0.5 && total >= 5);
+        hashPerformance.recentCorrect = correct;
+        hashPerformance.recentTotal = total;
+        hashPerformance.total += total;
+        hashPerformance.correct += correct;
+    }
+    hashPerformance.lastChecked = Date.now();
+}
+
+// ==========================================
+// DỰ ĐOÁN HASH CÓ TỰ ĐỘNG ĐẢO NGƯỢC
+// ==========================================
+async function getHashPrediction(currHash, prevHash) {
+    if (!currHash) return null;
+    
+    // Dự đoán cơ bản từ hash hiện tại (dùng parity)
+    const base = HashAnalyzer.simplePredict(currHash);
+    if (!base) return null;
+
+    // Nếu có prevHash, có thể tính diff để tăng confidence (tùy chọn)
+    let confidence = base.confidence;
+    let reason = base.reason;
+    
+    if (prevHash) {
+        const prevS = HashAnalyzer.analyzeStructure(prevHash);
+        const currS = HashAnalyzer.analyzeStructure(currHash);
+        if (prevS && currS) {
+            const diff5 = currS.byte5 - prevS.byte5;
+            // Tăng confidence nếu diff5 lớn (có thay đổi rõ)
+            if (Math.abs(diff5) > 50) confidence += 10;
+            reason += ` | diff5: ${diff5}`;
+        }
+    }
+
+    // Kiểm tra đảo ngược
+    let finalPrediction = base.prediction;
+    if (hashPerformance.shouldInvert) {
+        finalPrediction = finalPrediction === "Tài" ? "Xỉu" : "Tài";
+        reason = `[ĐẢO NGƯỢC] ${reason}`;
+        confidence = Math.max(confidence - 5, 50); // giảm nhẹ confidence
+    }
+
+    return {
+        prediction: finalPrediction,
+        confidence: Math.min(confidence, 80),
+        reason,
+        originalPrediction: base.prediction // lưu lại để học
+    };
+}
+
+// ==========================================
+// PHÂN TÍCH CẦU TRUYỀN THỐNG
+// ==========================================
 async function getRecentResults(limit = 30) {
     const rows = await History.find({ ketQua: { $ne: null } })
         .sort({ phien: -1 })
@@ -318,14 +169,12 @@ async function getRecentResults(limit = 30) {
 
 function detectStreakCau(results) {
     if (results.length < 3) return null;
-    
     const cur = results[0];
     let streak = 1;
     for (let i = 1; i < results.length; i++) {
         if (results[i] === cur) streak++;
         else break;
     }
-    
     if (streak >= 3) {
         return {
             type: `Cầu bệt ${streak} (${cur})`,
@@ -339,20 +188,16 @@ function detectStreakCau(results) {
 
 function detect11Cau(results) {
     if (results.length < 4) return null;
-    
     let isAlt = true;
     for (let i = 0; i < 4; i++) {
         if (results[i] === results[i + 1]) { isAlt = false; break; }
     }
-    
     if (!isAlt) return null;
-    
     let len = 2;
     for (let i = 1; i < results.length - 1; i++) {
         if (results[i] !== results[i + 1]) len++;
         else break;
     }
-    
     const next = results[0] === "Tài" ? "Xỉu" : "Tài";
     return {
         type: `Cầu 1-1 (dài ${len})`,
@@ -364,200 +209,103 @@ function detect11Cau(results) {
 
 function detect22Cau(results) {
     if (results.length < 6) return null;
-    
-    const ok = results[0] === results[1]
-        && results[2] === results[3]
-        && results[4] === results[5]
-        && results[0] !== results[2]
-        && results[2] !== results[4];
-    
+    const ok = results[0] === results[1] && results[2] === results[3] &&
+               results[4] === results[5] && results[0] !== results[2] &&
+               results[2] !== results[4];
     if (!ok) return null;
-    
     const predict = results[0] === "Tài" ? "Xỉu" : "Tài";
-    return {
-        type: `Cầu 2-2`,
-        duDoan: predict,
-        doTin: 65,
-        streak: 6
-    };
+    return { type: `Cầu 2-2`, duDoan: predict, doTin: 65, streak: 6 };
 }
 
 function detect33Cau(results) {
     if (results.length < 6) return null;
-    
-    const ok = results[0] === results[1]
-        && results[1] === results[2]
-        && results[3] === results[4]
-        && results[4] === results[5]
-        && results[0] !== results[3];
-    
+    const ok = results[0] === results[1] && results[1] === results[2] &&
+               results[3] === results[4] && results[4] === results[5] &&
+               results[0] !== results[3];
     if (!ok) return null;
-    
     const predict = results[0] === "Tài" ? "Xỉu" : "Tài";
-    return {
-        type: `Cầu 3-3`,
-        duDoan: predict,
-        doTin: 68,
-        streak: 6
-    };
+    return { type: `Cầu 3-3`, duDoan: predict, doTin: 68, streak: 6 };
 }
 
 function detectFreqCau(results) {
     const sample = results.slice(0, 15);
     if (sample.length < 10) return null;
-    
     const tai = sample.filter(r => r === "Tài").length;
     const xiu = sample.length - tai;
     const ratio = tai / sample.length;
-    
     if (ratio >= 0.7) {
-        return {
-            type: `Tần suất lệch (${tai}T/${xiu}X)`,
-            duDoan: "Xỉu",
-            doTin: 55,
-            streak: 0
-        };
+        return { type: `Tần suất lệch (${tai}T/${xiu}X)`, duDoan: "Xỉu", doTin: 55, streak: 0 };
     } else if (ratio <= 0.3) {
-        return {
-            type: `Tần suất lệch (${tai}T/${xiu}X)`,
-            duDoan: "Tài",
-            doTin: 55,
-            streak: 0
-        };
+        return { type: `Tần suất lệch (${tai}T/${xiu}X)`, duDoan: "Tài", doTin: 55, streak: 0 };
     }
     return null;
 }
 
 function analyzeCau(results) {
-    const detectors = [
-        detect33Cau,
-        detect22Cau,
-        detectStreakCau,
-        detect11Cau,
-        detectFreqCau,
-    ];
-    
+    const detectors = [detect33Cau, detect22Cau, detectStreakCau, detect11Cau, detectFreqCau];
     for (const fn of detectors) {
         const result = fn(results);
         if (result) return result;
     }
-    
-    return {
-        type: "Không có cầu rõ",
-        duDoan: "Bỏ",
-        doTin: 0,
-        streak: 0
-    };
+    return { type: "Không có cầu rõ", duDoan: "Bỏ", doTin: 0, streak: 0 };
 }
 
 // ==========================================
-// MASTER ANALYZER - KẾT HỢP TẤT CẢ
+// MASTER PREDICT (KẾT HỢP HASH + CẦU)
 // ==========================================
-
 async function masterPredict(prevHash, currHash, recentResults) {
-    // 1. Phân tích hash
-    const hashPrediction = prevHash && currHash 
-        ? HashAnalyzer.predictFromPair(prevHash, currHash)
-        : null;
+    // 1. Lấy dự đoán từ hash (có tự động đảo ngược)
+    const hashPred = await getHashPrediction(currHash, prevHash);
     
-    // 2. Phân tích cầu
-    const cauPrediction = analyzeCau(recentResults);
+    // 2. Dự đoán từ cầu
+    const cauPred = analyzeCau(recentResults);
     
-    // 3. Học từ lịch sử
-    const learnedPatterns = await HashAnalyzer.learnFromHistory(30);
+    // 3. Quyết định cuối cùng
+    let finalDuDoan, finalType, finalDoTin;
     
-    // 4. Kết hợp dự đoán
-    let finalPrediction = null;
-    let finalType = "";
-    let finalConfidence = 0;
-    
-    // Nếu hash prediction có confidence cao (>70) -> ưu tiên hash
-    if (hashPrediction && hashPrediction.confidence >= 70) {
-        finalPrediction = hashPrediction.prediction;
-        finalConfidence = hashPrediction.confidence;
-        finalType = `Hash: ${hashPrediction.reason}`;
-        
-        // Tăng confidence nếu khớp với cầu
-        if (cauPrediction.duDoan === hashPrediction.prediction && cauPrediction.doTin > 0) {
-            finalConfidence = Math.min(finalConfidence + 10, 95);
-            finalType += ` + ${cauPrediction.type}`;
-        }
+    // Nếu cả hai cùng hướng -> tăng confidence
+    if (hashPred && cauPred.duDoan !== "Bỏ" && hashPred.prediction === cauPred.duDoan) {
+        finalDuDoan = hashPred.prediction;
+        finalDoTin = Math.max(hashPred.confidence, cauPred.doTin) + 5;
+        finalType = `Kết hợp: Hash(${hashPred.reason}) + Cầu(${cauPred.type})`;
     }
-    // Nếu hash có confidence trung bình (50-70) -> kết hợp với cầu
-    else if (hashPrediction && hashPrediction.confidence >= 50) {
-        if (cauPrediction.duDoan === hashPrediction.prediction) {
-            // Hash và cầu cùng ý -> tăng confidence
-            finalPrediction = hashPrediction.prediction;
-            finalConfidence = Math.max(hashPrediction.confidence, cauPrediction.doTin) + 5;
-            finalType = `Kết hợp: ${hashPrediction.reason} + ${cauPrediction.type}`;
-        } else if (cauPrediction.doTin >= 65) {
-            // Cầu mạnh hơn -> theo cầu
-            finalPrediction = cauPrediction.duDoan;
-            finalConfidence = cauPrediction.doTin;
-            finalType = `Cầu (ghi đè hash): ${cauPrediction.type}`;
-        } else {
-            // Hash yếu và cầu yếu -> theo hash
-            finalPrediction = hashPrediction.prediction;
-            finalConfidence = hashPrediction.confidence;
-            finalType = `Hash (yếu): ${hashPrediction.reason}`;
-        }
+    // Nếu hash có confidence cao (>65) -> ưu tiên hash
+    else if (hashPred && hashPred.confidence >= 65) {
+        finalDuDoan = hashPred.prediction;
+        finalDoTin = hashPred.confidence;
+        finalType = `Hash (ưu tiên): ${hashPred.reason}`;
     }
-    // Nếu không có hash -> dùng cầu
-    else if (cauPrediction.doTin > 0) {
-        finalPrediction = cauPrediction.duDoan;
-        finalConfidence = cauPrediction.doTin;
-        finalType = `Cầu: ${cauPrediction.type}`;
+    // Nếu cầu có tín hiệu mạnh (>60) -> ưu tiên cầu
+    else if (cauPred.duDoan !== "Bỏ" && cauPred.doTin >= 60) {
+        finalDuDoan = cauPred.duDoan;
+        finalDoTin = cauPred.doTin;
+        finalType = `Cầu (ưu tiên): ${cauPred.type}`;
     }
-    // Không có gì -> bỏ
+    // Nếu cả hai yếu -> chọn hash nếu có, không thì bỏ
+    else if (hashPred) {
+        finalDuDoan = hashPred.prediction;
+        finalDoTin = hashPred.confidence;
+        finalType = `Hash (yếu): ${hashPred.reason}`;
+    }
     else {
-        finalPrediction = "Bỏ";
-        finalConfidence = 0;
+        finalDuDoan = "Bỏ";
+        finalDoTin = 0;
         finalType = "Không đủ dữ liệu";
     }
-    
-    // 5. Áp dụng học từ lịch sử
-    if (hashPrediction && learnedPatterns.patterns) {
-        const diff5 = hashPrediction.diffs?.diff5;
-        let rangeKey;
-        if (diff5 < -40) rangeKey = "giảm_mạnh";
-        else if (diff5 < -10) rangeKey = "giảm_vừa";
-        else if (diff5 <= 10) rangeKey = "ổn_định";
-        else if (diff5 <= 40) rangeKey = "tăng_vừa";
-        else rangeKey = "tăng_mạnh";
-        
-        const pattern = learnedPatterns.patterns[rangeKey];
-        
-        // Nếu pattern có accuracy < 40% -> đảo ngược dự đoán
-        if (pattern && pattern.total >= 5 && parseFloat(pattern.accuracy) < 40) {
-            const reversedPrediction = finalPrediction === "Tài" ? "Xỉu" : 
-                                       finalPrediction === "Xỉu" ? "Tài" : "Bỏ";
-            if (reversedPrediction !== "Bỏ") {
-                finalPrediction = reversedPrediction;
-                finalConfidence = Math.max(finalConfidence - 15, 50);
-                finalType = `Đảo ngược (pattern yếu ${pattern.accuracy}%): ${finalType}`;
-            }
-        }
-    }
-    
+
     return {
-        duDoan: finalPrediction,
-        doTin: Math.round(finalConfidence),
+        duDoan: finalDuDoan,
+        doTin: Math.round(finalDoTin),
         type: finalType,
-        hashAnalysis: hashPrediction,
-        cauAnalysis: cauPrediction,
-        learnedPatterns: learnedPatterns.patterns ? 
-            Object.keys(learnedPatterns.patterns).map(k => ({
-                pattern: k,
-                accuracy: learnedPatterns.patterns[k].accuracy + '%',
-                samples: learnedPatterns.patterns[k].total
-            })) : []
+        hashDetails: hashPred,
+        cauDetails: cauPred,
+        hashInverted: hashPerformance.shouldInvert
     };
 }
 
 // ==========================================
 // THỐNG KÊ
 // ==========================================
-
 async function getStats(limit = 50) {
     const rows = await History.find({
         ketQua: { $ne: null },
@@ -622,7 +370,7 @@ app.get('/api/taixiu', async (req, res) => {
         const currHash = latest._id;
         const prevHash = previous._id;
 
-        // --- Cập nhật kết quả vào DB ---
+        // --- Cập nhật kết quả phiên vừa ra ---
         const prevDoc = await History.findOne({ phien: phienVuaRa });
         let dungSai = null;
         if (prevDoc?.duDoan && prevDoc.duDoan !== "Bỏ") {
@@ -631,41 +379,39 @@ app.get('/api/taixiu', async (req, res) => {
             dungSai = "Bỏ";
         }
 
-        // Lưu thêm hash analysis
-        const hashStructure = HashAnalyzer.analyzeStructure(currHash);
-        
+        // Lưu hash và phân tích
+        const hashStruct = HashAnalyzer.analyzeStructure(currHash);
         await History.updateOne(
             { phien: phienVuaRa },
-            { 
-                ketQua, 
-                tong, 
-                dices, 
-                dungSai,
-                hashId: currHash,
-                hashAnalysis: hashStructure
-            },
+            { ketQua, tong, dices, dungSai, hashId: currHash, hashAnalysis: hashStruct },
             { upsert: true }
         );
 
-        // --- Lấy lịch sử để phân tích ---
+        // --- Tự động cập nhật hiệu suất hash ---
+        await updateHashPerformance();
+
+        // --- Lấy lịch sử kết quả để phân tích cầu ---
         const recentResults = await getRecentResults(30);
 
-        // --- MASTER PREDICT ---
+        // --- Dự đoán phiên tiếp theo ---
         const prediction = await masterPredict(prevHash, currHash, recentResults);
-
         const phienMoi = phienVuaRa + 1;
 
-        // --- Lưu dự đoán phiên mới ---
+        // Lưu dự đoán vào DB (có lưu hash original prediction)
         await History.updateOne(
             { phien: phienMoi },
             {
                 duDoan: prediction.duDoan,
-                cauPhatHien: prediction.type
+                cauPhatHien: prediction.type,
+                hashAnalysis: {
+                    ...hashStruct,
+                    originalPrediction: prediction.hashDetails?.originalPrediction || null
+                }
             },
             { upsert: true }
         );
 
-        // --- Lấy thống kê ---
+        // --- Thống kê ---
         const stats = await getStats(50);
 
         // --- Cảnh báo ---
@@ -685,38 +431,34 @@ app.get('/api/taixiu', async (req, res) => {
                 tong: r.tong,
                 duDoan: r.duDoan || "-",
                 dungSai: r.dungSai || "-",
-                hashId: r.hashId ? r.hashId.substring(22, 24) : "-"
+                byteCuoi: r.hashId ? r.hashId.substring(22, 24) : "-"
             })));
 
         res.json({
-            // Phiên vừa ra
             Phien_vua_ra: phienVuaRa,
             Ket_qua_vua_ra: ketQua,
             Tong_xuc_xac: tong,
             Dices: dices,
             Hash_hien_tai: currHash,
-            Hash_byte_cuoi: hashStructure ? hashStructure.last2Chars : null,
+            Byte_cuoi: hashStruct?.last2Chars,
 
-            // Dự đoán phiên tiếp
             Phien_du_doan: phienMoi,
             Cau_phat_hien: prediction.type,
             Do_tin_cay: `${prediction.doTin}%`,
             DU_DOAN: prediction.duDoan,
 
-            // Chi tiết phân tích
             Chi_tiet_phan_tich: {
-                Hash: prediction.hashAnalysis ? {
-                    du_doan: prediction.hashAnalysis.prediction,
-                    do_tin_cay: `${prediction.hashAnalysis.confidence}%`,
-                    ly_do: prediction.hashAnalysis.reason,
-                    chi_tiet_byte: prediction.hashAnalysis.curr?.details,
-                    thay_doi: prediction.hashAnalysis.diffs
+                Hash: prediction.hashDetails ? {
+                    du_doan_goc: prediction.hashDetails.originalPrediction,
+                    du_doan_sau_dieu_chinh: prediction.hashDetails.prediction,
+                    do_tin_cay: `${prediction.hashDetails.confidence}%`,
+                    ly_do: prediction.hashDetails.reason
                 } : null,
-                Cau: prediction.cauAnalysis,
-                Hoc_may: prediction.learnedPatterns
+                Cau: prediction.cauDetails,
+                Dang_dao_nguoc_hash: hashPerformance.shouldInvert,
+                Hieu_suat_hash: `${hashPerformance.recentCorrect}/${hashPerformance.recentTotal} đúng gần đây`
             },
 
-            // Thống kê
             Thong_ke: {
                 Tong_phien_du_doan: stats.tongPhienDuDoan,
                 Tong_phien_dung: stats.tongPhienDung,
@@ -736,39 +478,7 @@ app.get('/api/taixiu', async (req, res) => {
     }
 });
 
-// API phân tích hash
-app.get('/api/analyze-hash', (req, res) => {
-    const { hash, prevHash } = req.query;
-    
-    if (!hash) return res.status(400).json({ error: "Thiếu hash" });
-    
-    const singleAnalysis = HashAnalyzer.predictFromSingle(hash);
-    let pairAnalysis = null;
-    
-    if (prevHash) {
-        pairAnalysis = HashAnalyzer.predictFromPair(prevHash, hash);
-    }
-    
-    res.json({
-        hash,
-        structure: HashAnalyzer.analyzeStructure(hash),
-        single_analysis: singleAnalysis,
-        pair_analysis: pairAnalysis
-    });
-});
-
-// API học từ lịch sử
-app.get('/api/learn-patterns', async (req, res) => {
-    try {
-        const limit = parseInt(req.query.limit) || 50;
-        const learned = await HashAnalyzer.learnFromHistory(limit);
-        res.json(learned);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
-
-// API lấy lịch sử đầy đủ
+// API lấy lịch sử
 app.get('/api/history', async (req, res) => {
     try {
         const limit = parseInt(req.query.limit) || 50;
@@ -782,7 +492,7 @@ app.get('/api/history', async (req, res) => {
     }
 });
 
-// API xóa lịch sử (nếu cần test lại)
+// API reset dữ liệu
 app.delete('/api/history', async (req, res) => {
     try {
         await History.deleteMany({});
@@ -792,4 +502,4 @@ app.delete('/api/history', async (req, res) => {
     }
 });
 
-app.listen(port, () => console.log(`🚀 Server v4 chạy tại port ${port} - Tích hợp phân tích Hash`));
+app.listen(port, () => console.log(`🚀 Server v5 chạy tại port ${port} - Tự sửa sai khi dự đoán hash`));
