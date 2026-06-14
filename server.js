@@ -64,8 +64,8 @@ async function getUltraPrediction(sessions) {
     // --- Rule 2: Sequence Patterns (Cầu) ---
     if (sessions.length >= 3) {
         const historyResults = sessions.map(s => s.resultTruyenThong);
-        const last3 = historyResults.slice(-3);
-        const last2 = historyResults.slice(-2);
+        let last3 = historyResults.slice(-3);
+        let last2 = historyResults.slice(-2);
         
         // Cầu Bệt (Streak)
         if (last3[0] === "TAI" && last3[1] === "TAI" && last3[2] === "TAI") { 
@@ -114,7 +114,7 @@ async function getUltraPrediction(sessions) {
     return {
         prediction: finalPred,
         confidence: confidence.toFixed(1),
-        logic: `Sum(${prevSum}), Has1(${has1Prev}), Seq(${sessions.length >= 3 ? last3.join("-") : "N/A"}), HashAF(${countA}-${countF})`
+        logic: `Sum(${prevSum}), Has1(${has1Prev}), Seq(${last3.length > 0 ? last3.join("-") : "N/A"}), HashAF(${countA}-${countF})`
     };
 }
 
