@@ -25,6 +25,7 @@ const historySchema = new mongoose.Schema({
     dungSai:       { type: String, default: null },
     hashId:        { type: String, default: null },
     hashAnalysis:  { type: Object, default: null },
+    hashOriginalPrediction: { type: String, default: null }, // Dự đoán gốc từ hash
     timestamp:     { type: Date, default: Date.now }
 });
 const History = mongoose.model('History', historySchema);
@@ -33,19 +34,19 @@ app.use(cors());
 app.use(express.json());
 
 // ==========================================
-// BIẾN TOÀN CỤC THEO DÕI ĐỘ CHÍNH XÁC HASH
+// BIẾN TOÀN CỤC THEO DÕI HIỆU SUẤT HASH
 // ==========================================
 let hashPerformance = {
     total: 0,
     correct: 0,
     recentCorrect: 0,
     recentTotal: 0,
-    shouldInvert: false, // Tự động đảo ngược nếu accuracy thấp
+    shouldInvert: false,
     lastChecked: Date.now()
 };
 
 // ==========================================
-// PHÂN TÍCH HASH CƠ BẢN (CHỈ LẤY ĐẶC TRƯNG)
+// PHÂN TÍCH HASH CƠ BẢN
 // ==========================================
 class HashAnalyzer {
     static analyzeStructure(hashId) {
@@ -63,12 +64,10 @@ class HashAnalyzer {
         };
     }
 
-    // Hàm dự đoán đơn giản từ 1 hash, dùng byte5 mod 2 (tạm thời)
     static simplePredict(hashId) {
         const s = this.analyzeStructure(hashId);
         if (!s) return null;
-        // Dự đoán dựa trên parity của byte5 (chẵn -> Tài, lẻ -> Xỉu) 
-        // Đây là công thức khởi đầu, sẽ được điều chỉnh bởi cơ chế học
+        // Dự đoán dựa trên parity của byte5 (chẵn -> Tài, lẻ -> Xỉu)
         const prediction = s.byte5 % 2 === 0 ? "Tài" : "Xỉu";
         return {
             prediction,
@@ -82,9 +81,8 @@ class HashAnalyzer {
 // CẬP NHẬT HIỆU SUẤT HASH (TỰ HỌC)
 // ==========================================
 async function updateHashPerformance() {
-    // Lấy 20 phiên gần nhất có hash và kết quả
     const recent = await History.find({
-        hashId: { $ne: null },
+        hashOriginalPrediction: { $ne: null },
         ketQua: { $ne: null },
         duDoan: { $ne: null }
     })
@@ -96,21 +94,20 @@ async function updateHashPerformance() {
     let total = 0;
     for (const r of recent) {
         if (r.duDoan === "Bỏ") continue;
-        // Lấy dự đoán hash gốc từ hashAnalysis (nếu có)
-        if (r.hashAnalysis?.originalPrediction) {
-            total++;
-            if (r.hashAnalysis.originalPrediction === r.ketQua) correct++;
-        }
+        total++;
+        if (r.hashOriginalPrediction === r.ketQua) correct++;
     }
 
-    if (total > 0) {
+    console.log(`[HASH PERFORMANCE] Đúng: ${correct}/${total} phiên gần đây`);
+    
+    if (total >= 3) { // Chỉ cần 3 phiên để đánh giá
         const accuracy = correct / total;
-        // Nếu accuracy < 50% và có ít nhất 5 mẫu -> đảo ngược
-        hashPerformance.shouldInvert = (accuracy < 0.5 && total >= 5);
+        hashPerformance.shouldInvert = (accuracy < 0.5);
         hashPerformance.recentCorrect = correct;
         hashPerformance.recentTotal = total;
-        hashPerformance.total += total;
-        hashPerformance.correct += correct;
+        console.log(`[HASH PERFORMANCE] Accuracy: ${(accuracy*100).toFixed(1)}%, Đảo ngược: ${hashPerformance.shouldInvert}`);
+    } else {
+        console.log(`[HASH PERFORMANCE] Chưa đủ mẫu (${total}/3)`);
     }
     hashPerformance.lastChecked = Date.now();
 }
@@ -121,11 +118,9 @@ async function updateHashPerformance() {
 async function getHashPrediction(currHash, prevHash) {
     if (!currHash) return null;
     
-    // Dự đoán cơ bản từ hash hiện tại (dùng parity)
     const base = HashAnalyzer.simplePredict(currHash);
     if (!base) return null;
 
-    // Nếu có prevHash, có thể tính diff để tăng confidence (tùy chọn)
     let confidence = base.confidence;
     let reason = base.reason;
     
@@ -134,25 +129,23 @@ async function getHashPrediction(currHash, prevHash) {
         const currS = HashAnalyzer.analyzeStructure(currHash);
         if (prevS && currS) {
             const diff5 = currS.byte5 - prevS.byte5;
-            // Tăng confidence nếu diff5 lớn (có thay đổi rõ)
             if (Math.abs(diff5) > 50) confidence += 10;
             reason += ` | diff5: ${diff5}`;
         }
     }
 
-    // Kiểm tra đảo ngược
     let finalPrediction = base.prediction;
     if (hashPerformance.shouldInvert) {
         finalPrediction = finalPrediction === "Tài" ? "Xỉu" : "Tài";
         reason = `[ĐẢO NGƯỢC] ${reason}`;
-        confidence = Math.max(confidence - 5, 50); // giảm nhẹ confidence
+        confidence = Math.max(confidence - 5, 50);
     }
 
     return {
         prediction: finalPrediction,
         confidence: Math.min(confidence, 80),
         reason,
-        originalPrediction: base.prediction // lưu lại để học
+        originalPrediction: base.prediction
     };
 }
 
@@ -254,40 +247,28 @@ function analyzeCau(results) {
 // MASTER PREDICT (KẾT HỢP HASH + CẦU)
 // ==========================================
 async function masterPredict(prevHash, currHash, recentResults) {
-    // 1. Lấy dự đoán từ hash (có tự động đảo ngược)
     const hashPred = await getHashPrediction(currHash, prevHash);
-    
-    // 2. Dự đoán từ cầu
     const cauPred = analyzeCau(recentResults);
     
-    // 3. Quyết định cuối cùng
     let finalDuDoan, finalType, finalDoTin;
     
-    // Nếu cả hai cùng hướng -> tăng confidence
     if (hashPred && cauPred.duDoan !== "Bỏ" && hashPred.prediction === cauPred.duDoan) {
         finalDuDoan = hashPred.prediction;
         finalDoTin = Math.max(hashPred.confidence, cauPred.doTin) + 5;
-        finalType = `Kết hợp: Hash(${hashPred.reason}) + Cầu(${cauPred.type})`;
-    }
-    // Nếu hash có confidence cao (>65) -> ưu tiên hash
-    else if (hashPred && hashPred.confidence >= 65) {
+        finalType = `Kết hợp: Hash + Cầu (${cauPred.type})`;
+    } else if (hashPred && hashPred.confidence >= 65) {
         finalDuDoan = hashPred.prediction;
         finalDoTin = hashPred.confidence;
         finalType = `Hash (ưu tiên): ${hashPred.reason}`;
-    }
-    // Nếu cầu có tín hiệu mạnh (>60) -> ưu tiên cầu
-    else if (cauPred.duDoan !== "Bỏ" && cauPred.doTin >= 60) {
+    } else if (cauPred.duDoan !== "Bỏ" && cauPred.doTin >= 60) {
         finalDuDoan = cauPred.duDoan;
         finalDoTin = cauPred.doTin;
         finalType = `Cầu (ưu tiên): ${cauPred.type}`;
-    }
-    // Nếu cả hai yếu -> chọn hash nếu có, không thì bỏ
-    else if (hashPred) {
+    } else if (hashPred) {
         finalDuDoan = hashPred.prediction;
         finalDoTin = hashPred.confidence;
         finalType = `Hash (yếu): ${hashPred.reason}`;
-    }
-    else {
+    } else {
         finalDuDoan = "Bỏ";
         finalDoTin = 0;
         finalType = "Không đủ dữ liệu";
@@ -370,7 +351,7 @@ app.get('/api/taixiu', async (req, res) => {
         const currHash = latest._id;
         const prevHash = previous._id;
 
-        // --- Cập nhật kết quả phiên vừa ra ---
+        // --- Cập nhật kết quả phiên vừa ra (KHÔNG ghi đè hashAnalysis) ---
         const prevDoc = await History.findOne({ phien: phienVuaRa });
         let dungSai = null;
         if (prevDoc?.duDoan && prevDoc.duDoan !== "Bỏ") {
@@ -379,15 +360,13 @@ app.get('/api/taixiu', async (req, res) => {
             dungSai = "Bỏ";
         }
 
-        // Lưu hash và phân tích
-        const hashStruct = HashAnalyzer.analyzeStructure(currHash);
         await History.updateOne(
             { phien: phienVuaRa },
-            { ketQua, tong, dices, dungSai, hashId: currHash, hashAnalysis: hashStruct },
+            { $set: { ketQua, tong, dices, dungSai, hashId: currHash } },
             { upsert: true }
         );
 
-        // --- Tự động cập nhật hiệu suất hash ---
+        // --- Cập nhật hiệu suất hash ---
         await updateHashPerformance();
 
         // --- Lấy lịch sử kết quả để phân tích cầu ---
@@ -397,16 +376,16 @@ app.get('/api/taixiu', async (req, res) => {
         const prediction = await masterPredict(prevHash, currHash, recentResults);
         const phienMoi = phienVuaRa + 1;
 
-        // Lưu dự đoán vào DB (có lưu hash original prediction)
+        // Lưu dự đoán cho phiên mới, bao gồm originalPrediction
+        const hashStruct = HashAnalyzer.analyzeStructure(currHash);
         await History.updateOne(
             { phien: phienMoi },
             {
                 duDoan: prediction.duDoan,
                 cauPhatHien: prediction.type,
-                hashAnalysis: {
-                    ...hashStruct,
-                    originalPrediction: prediction.hashDetails?.originalPrediction || null
-                }
+                hashId: currHash,
+                hashAnalysis: hashStruct,
+                hashOriginalPrediction: prediction.hashDetails?.originalPrediction || null
             },
             { upsert: true }
         );
@@ -431,7 +410,8 @@ app.get('/api/taixiu', async (req, res) => {
                 tong: r.tong,
                 duDoan: r.duDoan || "-",
                 dungSai: r.dungSai || "-",
-                byteCuoi: r.hashId ? r.hashId.substring(22, 24) : "-"
+                byteCuoi: r.hashId ? r.hashId.substring(22, 24) : "-",
+                hashOrigPred: r.hashOriginalPrediction || "-"
             })));
 
         res.json({
@@ -478,7 +458,6 @@ app.get('/api/taixiu', async (req, res) => {
     }
 });
 
-// API lấy lịch sử
 app.get('/api/history', async (req, res) => {
     try {
         const limit = parseInt(req.query.limit) || 50;
@@ -492,7 +471,6 @@ app.get('/api/history', async (req, res) => {
     }
 });
 
-// API reset dữ liệu
 app.delete('/api/history', async (req, res) => {
     try {
         await History.deleteMany({});
@@ -502,4 +480,4 @@ app.delete('/api/history', async (req, res) => {
     }
 });
 
-app.listen(port, () => console.log(`🚀 Server v5 chạy tại port ${port} - Tự sửa sai khi dự đoán hash`));
+app.listen(port, () => console.log(`🚀 Server v6 chạy tại port ${port} - Tự sửa sai hash đã sửa lỗi`));
