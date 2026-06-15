@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MD5 PRO | Minimalist Predictor</title>
+    <title>MD5 PRO v3.0 | Quantum Predictor</title>
     <style>
         :root { --bg: #050505; --card: #111; --accent: #00ff88; --tai: #00ff88; --xiu: #ff3e3e; --text: #eee; }
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', -apple-system, sans-serif; }
@@ -14,35 +14,40 @@
         header h1 { font-size: 1.2rem; letter-spacing: 4px; color: var(--accent); opacity: 0.8; }
         
         .card { background: var(--card); border-radius: 20px; padding: 25px; margin-bottom: 20px; border: 1px solid #222; }
-        .main-card { text-align: center; border: 1px solid var(--accent); box-shadow: 0 0 30px rgba(0, 255, 136, 0.05); }
+        .main-card { text-align: center; border: 1px solid var(--accent); box-shadow: 0 0 40px rgba(0, 255, 136, 0.1); position: relative; overflow: hidden; }
+        .main-card::after { content: 'V3.0'; position: absolute; top: 10px; right: 10px; font-size: 0.6rem; color: var(--accent); border: 1px solid var(--accent); padding: 2px 5px; border-radius: 4px; }
         
         .label { font-size: 0.7rem; text-transform: uppercase; color: #666; letter-spacing: 2px; margin-bottom: 10px; }
-        .value { font-size: 2.5rem; font-weight: 800; margin: 10px 0; }
+        .value { font-size: 3rem; font-weight: 900; margin: 10px 0; text-shadow: 0 0 20px currentColor; }
         .tai { color: var(--tai); }
         .xiu { color: var(--xiu); }
         
         .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 20px; }
-        .info-item { background: #181818; padding: 15px; border-radius: 12px; }
-        .info-val { font-size: 1.1rem; font-weight: 600; color: var(--accent); }
+        .info-item { background: #181818; padding: 15px; border-radius: 12px; text-align: center; }
+        .info-val { font-size: 1.2rem; font-weight: 700; color: var(--accent); }
         
         .history { margin-top: 10px; }
         .hist-row { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #181818; font-size: 0.85rem; }
-        .status { font-weight: bold; }
+        .status { font-weight: bold; width: 50px; text-align: right; }
         .win { color: var(--tai); }
         .lose { color: var(--xiu); }
 
         .dices { display: flex; justify-content: center; gap: 10px; margin-bottom: 15px; }
         .dice { width: 35px; height: 35px; background: #222; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-weight: bold; border: 1px solid #333; }
+        
+        .progress-container { width: 100%; height: 4px; background: #222; border-radius: 2px; margin-top: 15px; overflow: hidden; }
+        .progress-bar { height: 100%; background: var(--accent); transition: width 0.5s ease; }
     </style>
 </head>
 <body>
     <div class="app">
-        <header><h1>MD5 PREDICTOR</h1></header>
+        <header><h1>QUANTUM ENGINE</h1></header>
 
         <div class="card main-card">
-            <div class="label">Dự đoán phiên <span id="nextId">...</span></div>
+            <div class="label">Phiên kế tiếp <span id="nextId">...</span></div>
             <div id="prediction" class="value">...</div>
-            <div style="font-size: 0.9rem; opacity: 0.6;" id="logic">Phân tích dữ liệu...</div>
+            <div id="logic" style="font-size: 0.85rem; color: var(--accent); font-weight: 600;">Khởi động Engine...</div>
+            <div class="progress-container"><div id="confBar" class="progress-bar" style="width: 0%"></div></div>
         </div>
 
         <div class="card">
@@ -55,17 +60,15 @@
                     <div class="info-val" id="conf">0%</div>
                 </div>
                 <div class="info-item">
-                    <div class="label">Tỉ lệ thắng</div>
+                    <div class="label">Win Rate</div>
                     <div class="info-val" id="winRate">0%</div>
                 </div>
             </div>
         </div>
 
         <div class="card">
-            <div class="label">Lịch sử 10 phiên</div>
-            <div class="history" id="history">
-                <!-- History rows go here -->
-            </div>
+            <div class="label">Lịch sử phân tích</div>
+            <div class="history" id="history"></div>
         </div>
     </div>
 
@@ -80,8 +83,9 @@
                 p.innerText = d.next.side;
                 p.className = 'value ' + (d.next.side === 'Tài' ? 'tai' : 'xiu');
                 
-                document.getElementById('logic').innerText = d.next.logic;
+                document.getElementById('logic').innerText = d.next.logic.toUpperCase();
                 document.getElementById('conf').innerText = d.next.conf + '%';
+                document.getElementById('confBar').style.width = d.next.conf + '%';
                 document.getElementById('winRate').innerText = d.stats.winRate + '%';
                 
                 const dices = document.getElementById('dices');
@@ -90,9 +94,9 @@
                 const hist = document.getElementById('history');
                 hist.innerHTML = d.history.map(h => `
                     <div class="hist-row">
-                        <span>#${h.phien}</span>
-                        <span class="${h.side === 'Tài' ? 'tai' : 'xiu'}">${h.side}</span>
-                        <span>${h.real || '...'}</span>
+                        <span style="color:#666">#${h.phien}</span>
+                        <span class="${h.side === 'Tài' ? 'tai' : 'xiu'}" style="font-weight:700">${h.side}</span>
+                        <span style="opacity:0.6">${h.real || '...'}</span>
                         <span class="status ${h.win ? 'win' : 'lose'}">${h.win === null ? '' : (h.win ? 'WIN' : 'LOSE')}</span>
                     </div>
                 `).join('');
