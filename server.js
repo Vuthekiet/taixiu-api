@@ -51,22 +51,18 @@ function predictNextResult(sessions) {
 
     // CHIẾN THUẬT QUYẾT ĐỊNH
     if (streak >= 3) {
-        // Ưu tiên đánh theo bệt (Trend Following)
         finalPred = results[0];
         confidence = 75 + (streak * 2);
         logic = `Cầu bệt ${streak} tay: Đánh thuận`;
     } else if (rsi > 65) {
-        // Quá mua (Điểm quá cao) -> Hồi quy về XIU
         finalPred = 0;
         confidence = 65 + (rsi - 65);
         logic = `RSI cao (${rsi.toFixed(1)}): Hồi quy XIU`;
     } else if (rsi < 35) {
-        // Quá bán (Điểm quá thấp) -> Hồi quy về TAI
         finalPred = 1;
         confidence = 65 + (35 - rsi);
         logic = `RSI thấp (${rsi.toFixed(1)}): Hồi quy TAI`;
     } else {
-        // Đánh theo xu hướng EMA so với trung bình 10.5
         finalPred = ema5 > 10.5 ? 0 : 1;
         confidence = 60 + Math.abs(ema5 - 10.5) * 5;
         logic = `EMA (${ema5.toFixed(1)}) hướng về ${finalPred === 1 ? 'TAI' : 'XIU'}`;
@@ -94,7 +90,6 @@ app.get("/api/taixiu", async (req, res) => {
         if (currentPhase !== latest.id) {
             currentPhase = latest.id;
             
-            // Cập nhật kết quả cho dự đoán trước đó
             if (predictionHistory.length > 0) {
                 const lastPred = predictionHistory[0];
                 if (lastPred.phien === latest.id) {
@@ -103,7 +98,6 @@ app.get("/api/taixiu", async (req, res) => {
                 }
             }
 
-            // Tạo dự đoán mới cho phiên tiếp theo
             const prediction = predictNextResult(sessions);
             predictionHistory.unshift({
                 phien: latest.id + 1,
@@ -241,4 +235,6 @@ app.get("/", (req, res) => {
     `);
 });
 
-app.listen(PORT, () => console.log(\`Server running on port \${PORT}\`));
+app.listen(PORT, () => {
+    console.log("Server running on port " + PORT);
+});
