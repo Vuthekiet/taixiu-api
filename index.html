@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MD5 PRO | Minimalist Predictor</title>
+    <style>
+        :root { --bg: #050505; --card: #111; --accent: #00ff88; --tai: #00ff88; --xiu: #ff3e3e; --text: #eee; }
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', -apple-system, sans-serif; }
+        body { background: var(--bg); color: var(--text); display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 15px; }
+        .app { width: 100%; max-width: 450px; }
+        
+        header { text-align: center; margin-bottom: 25px; }
+        header h1 { font-size: 1.2rem; letter-spacing: 4px; color: var(--accent); opacity: 0.8; }
+        
+        .card { background: var(--card); border-radius: 20px; padding: 25px; margin-bottom: 20px; border: 1px solid #222; }
+        .main-card { text-align: center; border: 1px solid var(--accent); box-shadow: 0 0 30px rgba(0, 255, 136, 0.05); }
+        
+        .label { font-size: 0.7rem; text-transform: uppercase; color: #666; letter-spacing: 2px; margin-bottom: 10px; }
+        .value { font-size: 2.5rem; font-weight: 800; margin: 10px 0; }
+        .tai { color: var(--tai); }
+        .xiu { color: var(--xiu); }
+        
+        .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 20px; }
+        .info-item { background: #181818; padding: 15px; border-radius: 12px; }
+        .info-val { font-size: 1.1rem; font-weight: 600; color: var(--accent); }
+        
+        .history { margin-top: 10px; }
+        .hist-row { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #181818; font-size: 0.85rem; }
+        .status { font-weight: bold; }
+        .win { color: var(--tai); }
+        .lose { color: var(--xiu); }
+
+        .dices { display: flex; justify-content: center; gap: 10px; margin-bottom: 15px; }
+        .dice { width: 35px; height: 35px; background: #222; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-weight: bold; border: 1px solid #333; }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <header><h1>MD5 PREDICTOR</h1></header>
+
+        <div class="card main-card">
+            <div class="label">Dự đoán phiên <span id="nextId">...</span></div>
+            <div id="prediction" class="value">...</div>
+            <div style="font-size: 0.9rem; opacity: 0.6;" id="logic">Phân tích dữ liệu...</div>
+        </div>
+
+        <div class="card">
+            <div class="dices" id="dices">
+                <div class="dice">-</div><div class="dice">-</div><div class="dice">-</div>
+            </div>
+            <div class="info-grid">
+                <div class="info-item">
+                    <div class="label">Độ tin cậy</div>
+                    <div class="info-val" id="conf">0%</div>
+                </div>
+                <div class="info-item">
+                    <div class="label">Tỉ lệ thắng</div>
+                    <div class="info-val" id="winRate">0%</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="label">Lịch sử 10 phiên</div>
+            <div class="history" id="history">
+                <!-- History rows go here -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        async function refresh() {
+            try {
+                const r = await fetch('/api/data');
+                const d = await r.json();
+                
+                document.getElementById('nextId').innerText = d.next.phien;
+                const p = document.getElementById('prediction');
+                p.innerText = d.next.side;
+                p.className = 'value ' + (d.next.side === 'Tài' ? 'tai' : 'xiu');
+                
+                document.getElementById('logic').innerText = d.next.logic;
+                document.getElementById('conf').innerText = d.next.conf + '%';
+                document.getElementById('winRate').innerText = d.stats.winRate + '%';
+                
+                const dices = document.getElementById('dices');
+                dices.innerHTML = d.current.dices.map(v => `<div class="dice">${v}</div>`).join('');
+                
+                const hist = document.getElementById('history');
+                hist.innerHTML = d.history.map(h => `
+                    <div class="hist-row">
+                        <span>#${h.phien}</span>
+                        <span class="${h.side === 'Tài' ? 'tai' : 'xiu'}">${h.side}</span>
+                        <span>${h.real || '...'}</span>
+                        <span class="status ${h.win ? 'win' : 'lose'}">${h.win === null ? '' : (h.win ? 'WIN' : 'LOSE')}</span>
+                    </div>
+                `).join('');
+            } catch (e) {}
+        }
+        setInterval(refresh, 3000);
+        refresh();
+    </script>
+</body>
+</html>
