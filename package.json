@@ -1,22 +1,16 @@
 {
-  "name": "taixiu-predictor",
+  "name": "taixiu-md5-predictor",
   "version": "1.0.0",
-  "description": "Tài Xỉu Predictor Dashboard",
-  "main": "server.js",
+  "description": "Tai Xiu MD5 Predictor Pro",
+  "main": "optimized_app.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "nodemon server.js"
+    "start": "node optimized_app.js"
   },
   "dependencies": {
     "express": "^4.18.2",
-    "axios": "^1.6.0"
-  },
-  "devDependencies": {
-    "nodemon": "^3.0.0"
+    "axios": "^1.6.2"
   },
   "engines": {
-    "node": ">=16.0.0"
-  },
-  "author": "",
-  "license": "ISC"
+    "node": ">=14.0.0"
+  }
 }
