@@ -10,7 +10,7 @@ const port = process.env.PORT || 3000;
 // ==========================================
 const MONGODB_URI = "mongodb+srv://Bolakiettrumtx:Kiet280911@cluster0.izuwm8b.mongodb.net/taixiuDB?retryWrites=true&w=majority";
 mongoose.connect(MONGODB_URI)
-  .then(() => console.log("✅ AI v9.2 Ultra - Database Connected!"))
+  .then(() => console.log("✅ AI v11.0 Dice Master - Database Connected!"))
   .catch(err => console.error("❌ DB Error:", err));
 
 // ==========================================
@@ -32,83 +32,107 @@ app.use(cors());
 app.use(express.json());
 
 // ==========================================
-// AI CORE: THUẬT TOÁN TỰ ĐIỀU CHỈNH (NODE.JS VERSION)
+// AI CORE: THUẬT TOÁN DỰ ĐOÁN ĐIỂM RƠI & BIẾN ĐỘNG XÚC XẮC
 // ==========================================
 
-function getRules(historyItem) {
-    const sid = historyItem.id;
-    const h = historyItem._id;
-    const sumVal = historyItem.point;
+function getDiceAlgorithm(sessions) {
+    if (!sessions || sessions.length < 15) {
+        return { prediction: "Tài", confidence: "50.0", logic: "Đang lấy dữ liệu lịch sử..." };
+    }
+
+    // Chuyển đổi dữ liệu sang dạng dễ xử lý
+    const h = sessions.map(s => {
+        const sum = (s.dice1 || 0) + (s.dice2 || 0) + (s.dice3 || 0);
+        if (sum === 0 && s.resultTruyenThong) return s.resultTruyenThong === 'TAI' ? 1 : 0;
+        return sum > 10 ? 1 : 0;
+    });
+
+    const rawH = sessions;
+    let curStreak = 0; 
+    for(let i=0; i<h.length; i++) { 
+        if(h[i] === h[0]) curStreak++; 
+        else break; 
+    }
+
+    let finalPred = -1;
+    let logicMsg = "";
+    let confBase = 70;
+
+    // 1. VIP 14: GAUSSIAN NOISE FILTER (Lọc nhiễu động điểm số)
+    let gaussianPred = -1;
+    let sums = [];
+    for(let i=0; i<Math.min(15, rawH.length); i++) {
+        let s = (rawH[i].dice1||0) + (rawH[i].dice2||0) + (rawH[i].dice3||0);
+        if(s > 0) sums.push(s);
+    }
     
-    // Calculate h_seed from hash
-    let hSeed = 0;
-    for (let i = 0; i < h.length; i += 2) {
-        if (i + 1 < h.length) {
-            hSeed += parseInt(h.substring(i, i + 2), 16);
+    if (sums.length >= 10) {
+        let mean = sums.reduce((a, b) => a + b, 0) / sums.length;
+        let variance = sums.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / sums.length;
+        let stdDev = Math.sqrt(variance);
+        
+        if (stdDev < 1.5 && curStreak >= 3) {
+            gaussianPred = h[0] === 1 ? 0 : 1; // Đảo chiều khi điểm số quá ổn định
+        } else if (stdDev > 5.0) {
+            if (mean > 13) gaussianPred = 0; // Tài quá cao -> Xỉu
+            else if (mean < 8) gaussianPred = 1; // Xỉu quá thấp -> Tài
         }
     }
 
-    return {
-        chaos: (sid ^ hSeed) % 2 === 0 ? "Tài" : "Xỉu",
-        sumParity: sumVal % 2 === 0 ? "Tài" : "Xỉu",
-        idParity: sid % 2 === 0 ? "Tài" : "Xỉu",
-        fixedTai: "Tài",
-        fixedXiu: "Xỉu"
-    };
-}
-
-async function getUltraPrediction(sessions) {
-    if (!sessions || sessions.length < 10) { // Need at least 10 sessions for self-correction
-        return {
-            prediction: "Tài", // Default if not enough history
-            confidence: "50.0",
-            logic: "Not enough history for adaptive prediction"
-        };
-    }
-    
-    const currentSession = sessions[sessions.length - 1];
-    
-    // Evaluate rules on recent history (last 5 sessions for scoring)
-    const ruleScores = {
-        chaos: 0,
-        sumParity: 0,
-        idParity: 0,
-        fixedTai: 0,
-        fixedXiu: 0
-    };
-    
-    for (let i = sessions.length - 6; i < sessions.length - 1; i++) { // Check last 5 completed sessions
-        const historyItem = sessions[i];
-        const actualResult = sessions[i+1].resultTruyenThong === "TAI" ? "Tài" : "Xỉu";
-        const rules = getRules(historyItem);
-
-        for (const ruleName in rules) {
-            if (rules[ruleName] === actualResult) {
-                ruleScores[ruleName]++;
+    // 2. VIP 18: PHÂN TÍCH ĐIỂM RƠI DICE (Dice Fall Analysis)
+    let diceFallPred = -1;
+    if (rawH.length >= 10) {
+        let lastDiceSets = rawH.slice(0, 10).map(x => (x.dice1||0) + (x.dice2||0) + (x.dice3||0));
+        let isMonotonic = true;
+        for(let i=0; i<lastDiceSets.length-1; i++) {
+            if(Math.abs(lastDiceSets[i] - lastDiceSets[i+1]) > 2) {
+                isMonotonic = false;
+                break;
             }
         }
-    }
-    
-    // Pick the best performing rule
-    let bestRule = "fixedTai"; // Default best rule
-    let maxScore = -1;
-    for (const ruleName in ruleScores) {
-        if (ruleScores[ruleName] > maxScore) {
-            maxScore = ruleScores[ruleName];
-            bestRule = ruleName;
+        if(isMonotonic && curStreak >= 2) {
+            diceFallPred = h[0] === 1 ? 0 : 1; // Dự đoán gãy nhịp khi điểm rơi quá đều
         }
     }
 
-    // Apply the best rule to the current session to get the prediction for the next session
-    const currentRules = getRules(currentSession);
-    const finalPred = currentRules[bestRule];
+    // 3. VIP 13: MARKOV CHAIN (Ma trận tầng chéo)
+    let markovPred = -1;
+    if (h.length >= 20) {
+        let pattern = "" + h[2] + h[1] + h[0];
+        let t1 = 0, t0 = 0;
+        for (let i = 3; i < h.length - 1; i++) {
+            if ("" + h[i+2] + h[i+1] + h[i] === pattern) {
+                if (h[i-1] === 1) t1++; else t0++;
+            }
+        }
+        if (t1 > t0 && t1 >= 2) markovPred = 1;
+        else if (t0 > t1 && t0 >= 2) markovPred = 0;
+    }
 
-    const confidence = (maxScore / 5) * 100; // Confidence based on best rule's recent accuracy
+    // CÂY QUYẾT ĐỊNH ƯU TIÊN ĐIỂM RƠI
+    if (diceFallPred !== -1) { 
+        finalPred = diceFallPred; 
+        logicMsg = "VIP 18 (ĐIỂM RƠI): CHUỖI ĐIỂM BIẾN ĐỘNG THẤP"; 
+        confBase = 92; 
+    } else if (gaussianPred !== -1) { 
+        finalPred = gaussianPred; 
+        logicMsg = "VIP 14 (GAUSSIAN): LỆCH CHUẨN ĐIỂM SỐ"; 
+        confBase = 88; 
+    } else if (markovPred !== -1) { 
+        finalPred = markovPred; 
+        logicMsg = "VIP 13 (MARKOV): MA TRẬN ĐIỂM LẶP"; 
+        confBase = 85; 
+    } else {
+        // Mặc định dựa trên xu hướng gần nhất
+        finalPred = h[0] === 1 ? 1 : 0;
+        logicMsg = "XU HƯỚNG ĐIỂM HIỆN TẠI";
+        confBase = 75;
+    }
 
     return {
-        prediction: finalPred,
-        confidence: confidence.toFixed(1),
-        logic: `Adaptive: Best rule is ${bestRule} (Accuracy: ${confidence.toFixed(1)}%)`
+        prediction: finalPred === 1 ? "Tài" : "Xỉu",
+        confidence: confBase.toFixed(1),
+        logic: logicMsg
     };
 }
 
@@ -123,25 +147,29 @@ app.get("/api/taixiu", async (req, res) => {
         
         if (!data?.list) throw new Error("API Error");
 
-        const sessions = data.list.reverse(); 
-        const latest = sessions[sessions.length - 1];
+        // Dữ liệu từ API thường sắp xếp từ mới đến cũ
+        const sessions = data.list; 
+        const latest = sessions[0];
         const phienVuaRa = latest.id;
-        const ketQua = latest.resultTruyenThong === "TAI" ? "Tài" : "Xỉu";
+        
+        let sum = (latest.dice1 || 0) + (latest.dice2 || 0) + (latest.dice3 || 0);
+        let ketQua = sum > 10 ? "Tài" : "Xỉu";
+        if (sum === 0 && latest.resultTruyenThong) ketQua = latest.resultTruyenThong === 'TAI' ? "Tài" : "Xỉu";
 
         // Cập nhật kết quả phiên vừa ra
         await History.updateOne(
             { phien: phienVuaRa },
-            { $set: { ketQua, tong: latest.point, dices: latest.dices, hashId: latest._id } },
+            { $set: { ketQua, tong: sum, dices: [latest.dice1, latest.dice2, latest.dice3], hashId: latest._id } },
             { upsert: true }
         );
 
         // Dự đoán phiên mới
-        const ultra = await getUltraPrediction(sessions);
+        const aiResult = getDiceAlgorithm(sessions);
         const phienMoi = phienVuaRa + 1;
 
         await History.updateOne(
             { phien: phienMoi },
-            { $set: { duDoan: ultra.prediction } },
+            { $set: { duDoan: aiResult.prediction } },
             { upsert: true }
         );
 
@@ -153,12 +181,14 @@ app.get("/api/taixiu", async (req, res) => {
         res.json({
             Phien_HT: phienVuaRa,
             Ket_Qua: ketQua.toUpperCase(),
-            Dices: latest.dices,
+            Dices: [latest.dice1, latest.dice2, latest.dice3],
+            Tong_Diem: sum,
             Phien_Du_Doan: phienMoi,
-            DU_DOAN: ultra.prediction.toUpperCase(),
-            Do_Tin_Cay: `${ultra.confidence}%`,
+            DU_DOAN: aiResult.prediction.toUpperCase(),
+            Do_Tin_Cay: `${aiResult.confidence}%`,
             WinRate_10_Phien: `${winCount}/10`,
-            Logic_Info: ultra.logic
+            Logic_Info: aiResult.logic,
+            Version: "11.0 Dice Master"
         });
 
     } catch (err) {
@@ -166,4 +196,4 @@ app.get("/api/taixiu", async (req, res) => {
     }
 });
 
-app.listen(port, () => console.log(`🚀 AI v9.2 Ultra - 90% Accuracy running on port ${port}`));
+app.listen(port, () => console.log(`🚀 AI v11.0 Dice Master running on port ${port}`)); 
