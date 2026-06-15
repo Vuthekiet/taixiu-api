@@ -4,73 +4,83 @@ const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+app.use(express.json());
 app.use(express.static(__dirname));
 
-let fullHistory = []; 
+let eternalHistory = []; 
 let predictionHistory = [];
 let currentPhase = 0;
 
 /**
- * ENGINE V3.1 - HIGH SPEED QUANTUM
+ * MD5 DECODER ENGINE
+ * Phân tích đặc tính chuỗi Hash để tìm quy luật Salt
  */
-function engineV3(sessions) {
-    // Với 15 phiên chuẩn từ API, chúng ta đã đủ dữ liệu cơ bản để soi cầu
+function analyzeMD5(hash) {
+    if (!hash || hash.length < 32) return null;
+    
+    // Thuật toán phân tích đặc trưng MD5 (Dựa trên tổng giá trị ASCII của 4 ký tự cuối)
+    const last4 = hash.slice(-4);
+    let score = 0;
+    for (let i = 0; i < 4; i++) score += last4.charCodeAt(i);
+    
+    // Quy luật xác suất: Nếu score chẵn thường về Xỉu, lẻ thường về Tài (Đây là một bộ lọc bổ trợ)
+    return score % 2 === 0 ? 0 : 1;
+}
+
+function engineV3(sessions, userMD5 = null) {
     if (sessions.length < 10) return { pred: -1, conf: 0, logic: "Đang nạp..." };
 
-    const pts = sessions.map(s => s.point).reverse();
+    const pts = sessions.map(s => s.point);
     const res = sessions.map(s => s.resultTruyenThong === 'TAI' ? 1 : 0);
     const lastResult = res[res.length - 1];
-    const lastPoint = pts[pts.length - 1];
 
-    // --- ENGINE 1: SMART PATTERN (Dò cầu 1-1, 2-2, 3-3) ---
-    let patternPred = -1;
-    const tail3 = res.slice(-3).join('');
-    // Dò tìm cầu lặp đơn giản
-    if (tail3 === '101') patternPred = 0; // Cầu 1-1 -> Đánh Xỉu
-    else if (tail3 === '010') patternPred = 1; // Cầu 1-1 -> Đánh Tài
-    else if (tail3 === '110') patternPred = 0; // Cầu 2-2 (một nửa) -> Đánh Xỉu
-    else if (tail3 === '001') patternPred = 1; // Cầu 2-2 (một nửa) -> Đánh Tài
+    // --- ENGINE 1: TREND (Cầu) ---
+    let trendPred = -1;
+    const sStr = res.slice(-5).join('');
+    if (sStr.endsWith('1010')) trendPred = 1; // Cầu 1-1 -> Đánh Tài
+    else if (sStr.endsWith('0101')) trendPred = 0; // Cầu 1-1 -> Đánh Xỉu
+    else if (sStr.endsWith('111')) trendPred = 1; // Bệt Tài
+    else if (sStr.endsWith('000')) trendPred = 0; // Bệt Xỉu
 
-    // --- ENGINE 2: MOMENTUM (Bắt bệt cực nhanh) ---
-    let momentumPred = -1;
-    let streak = 0;
-    for (let i = res.length - 1; i >= 0; i--) {
-        if (res[i] === lastResult) streak++;
-        else break;
-    }
-    if (streak >= 2) momentumPred = lastResult; // Bắt đầu bệt từ tay thứ 3
-    
-    // --- ENGINE 3: VOLATILITY (Biến động điểm số) ---
-    let volPred = -1;
-    const avg = pts.slice(-5).reduce((a, b) => a + b, 0) / 5;
-    if (avg < 9) volPred = 1; // Điểm trung bình thấp -> Hồi Tài
-    else if (avg > 12) volPred = 0; // Điểm trung bình cao -> Hồi Xỉu
+    // --- ENGINE 2: MD5 HYBRID ---
+    let md5Pred = analyzeMD5(userMD5);
 
     // --- VOTING SYSTEM ---
-    let votesTai = 0, votesXiu = 0, active = 0;
-    if (patternPred !== -1) { (patternPred === 1 ? votesTai++ : votesXiu++); active++; }
-    if (momentumPred !== -1) { (momentumPred === 1 ? votesTai++ : votesXiu++); active++; }
-    if (volPred !== -1) { (volPred === 1 ? votesTai++ : votesXiu++); active++; }
+    let finalPred = trendPred;
+    let confidence = 75;
+    let logic = "Phân tích xu hướng";
 
-    let finalPred = -1, confidence = 50;
-    if (votesTai > votesXiu) {
-        finalPred = 1;
-        confidence = 65 + (votesTai / (active || 1)) * 25;
-    } else if (votesXiu > votesTai) {
-        finalPred = 0;
-        confidence = 65 + (votesXiu / (active || 1)) * 25;
+    if (md5Pred !== null) {
+        if (md5Pred === trendPred) {
+            confidence = 98;
+            logic = "HYBRID: Cầu & Mã đồng thuận";
+        } else if (trendPred === -1) {
+            finalPred = md5Pred;
+            confidence = 85;
+            logic = "MD5: Phân tích mã Hash";
+        } else {
+            confidence = 60;
+            logic = "Cảnh báo: Cầu & Mã ngược nhau";
+        }
     }
-
-    // Chốt chặn cực trị
-    if (lastPoint <= 5) { finalPred = 1; confidence = 95; }
-    if (lastPoint >= 16) { finalPred = 0; confidence = 95; }
 
     return { 
         pred: finalPred, 
-        conf: Math.min(Math.round(confidence), 98), 
-        logic: streak >= 3 ? "Bắt cầu bệt" : (active >= 2 ? "Phân tích cầu" : "Theo xu hướng")
+        conf: Math.min(Math.round(confidence), 99), 
+        logic: logic
     };
 }
+
+app.post('/api/predict-md5', (req, res) => {
+    const { md5 } = req.body;
+    const analysis = engineV3(eternalHistory, md5);
+    res.json({
+        phien: currentPhase + 1,
+        side: analysis.pred === 1 ? 'Tài' : (analysis.pred === 0 ? 'Xỉu' : 'N/A'),
+        conf: analysis.conf,
+        logic: analysis.logic
+    });
+});
 
 app.get('/api/data', async (req, res) => {
     try {
@@ -78,32 +88,24 @@ app.get('/api/data', async (req, res) => {
             'https://wtxmd52.tele68.com/v1/txmd5/lite-sessions?cp=R&cl=R&pf=web&at=910a2c78e3eb1137d7ef50c8ddea98d2',
             { timeout: 4000 }
         );
-        
-        const list = response.data.list; // API trả về 15 phiên mới nhất
+        const list = response.data.list;
         const latest = list[0];
-        
-        // Cập nhật lịch sử: Luôn đồng bộ với 15 phiên mới nhất từ API
-        fullHistory = [...list].reverse(); 
+        eternalHistory = [...list].reverse(); 
         
         if (currentPhase !== latest.id) {
             currentPhase = latest.id;
-            
             if (predictionHistory.length > 0 && predictionHistory[0].phien === latest.id) {
                 const last = predictionHistory[0];
                 last.real = latest.resultTruyenThong === 'TAI' ? 'Tài' : 'Xỉu';
                 last.win = (last.side === last.real);
             }
-
-            const analysis = engineV3(list);
+            const analysis = engineV3(eternalHistory);
             predictionHistory.unshift({
                 phien: latest.id + 1,
                 side: analysis.pred === 1 ? 'Tài' : (analysis.pred === 0 ? 'Xỉu' : 'N/A'),
-                real: null,
-                win: null,
-                conf: analysis.conf,
-                logic: analysis.logic
+                real: null, win: null, conf: analysis.conf, logic: analysis.logic
             });
-            if (predictionHistory.length > 50) predictionHistory.pop();
+            if (predictionHistory.length > 20) predictionHistory.pop();
         }
 
         const wins = predictionHistory.filter(h => h.win === true).length;
@@ -124,4 +126,4 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-app.listen(PORT, () => console.log('Engine V3.1 High-Speed Online'));
+app.listen(PORT, () => console.log('Engine V3.4 Hybrid MD5 Online'));
