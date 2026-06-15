@@ -6,88 +6,70 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.static(__dirname));
 
-let fullHistory = []; // Lưu trữ tối đa 100 phiên
+let fullHistory = []; 
 let predictionHistory = [];
 let currentPhase = 0;
 
 /**
- * ENGINE V3.0 - QUANTUM MULTI-STRATEGY
+ * ENGINE V3.1 - HIGH SPEED QUANTUM
  */
 function engineV3(sessions) {
-    if (sessions.length < 30) return { pred: -1, conf: 0, logic: "Đang nạp dữ liệu sâu..." };
+    // Với 15 phiên chuẩn từ API, chúng ta đã đủ dữ liệu cơ bản để soi cầu
+    if (sessions.length < 10) return { pred: -1, conf: 0, logic: "Đang nạp..." };
 
     const pts = sessions.map(s => s.point).reverse();
     const res = sessions.map(s => s.resultTruyenThong === 'TAI' ? 1 : 0);
     const lastResult = res[res.length - 1];
     const lastPoint = pts[pts.length - 1];
 
-    // --- ENGINE 1: PATTERN RECOGNITION (Tìm kiếm lịch sử) ---
+    // --- ENGINE 1: SMART PATTERN (Dò cầu 1-1, 2-2, 3-3) ---
     let patternPred = -1;
-    const currentPattern = res.slice(-4).join('');
-    let matches = { 1: 0, 0: 0 };
-    for (let i = 0; i < res.length - 5; i++) {
-        const p = res.slice(i, i + 4).join('');
-        if (p === currentPattern) {
-            matches[res[i + 4]]++;
-        }
-    }
-    if (matches[1] > matches[0]) patternPred = 1;
-    else if (matches[0] > matches[1]) patternPred = 0;
+    const tail3 = res.slice(-3).join('');
+    // Dò tìm cầu lặp đơn giản
+    if (tail3 === '101') patternPred = 0; // Cầu 1-1 -> Đánh Xỉu
+    else if (tail3 === '010') patternPred = 1; // Cầu 1-1 -> Đánh Tài
+    else if (tail3 === '110') patternPred = 0; // Cầu 2-2 (một nửa) -> Đánh Xỉu
+    else if (tail3 === '001') patternPred = 1; // Cầu 2-2 (một nửa) -> Đánh Tài
 
-    // --- ENGINE 2: DYNAMIC MOMENTUM (Bắt cầu bệt/đảo) ---
+    // --- ENGINE 2: MOMENTUM (Bắt bệt cực nhanh) ---
     let momentumPred = -1;
     let streak = 0;
     for (let i = res.length - 1; i >= 0; i--) {
         if (res[i] === lastResult) streak++;
         else break;
     }
-    // Nếu bệt >= 3: Đánh thuận (Trend following)
-    // Nếu bệt 1-1 liên tiếp >= 4: Đánh đảo (Anti-trend)
-    if (streak >= 3) momentumPred = lastResult;
+    if (streak >= 2) momentumPred = lastResult; // Bắt đầu bệt từ tay thứ 3
     
-    // --- ENGINE 3: MEAN REVERSION (Hồi quy điểm số) ---
-    let meanPred = -1;
-    const emaShort = calculateEMA(pts, 3);
-    const emaLong = calculateEMA(pts, 7);
-    if (emaShort > emaLong && lastPoint < 14) meanPred = 1;
-    else if (emaShort < emaLong && lastPoint > 7) meanPred = 0;
+    // --- ENGINE 3: VOLATILITY (Biến động điểm số) ---
+    let volPred = -1;
+    const avg = pts.slice(-5).reduce((a, b) => a + b, 0) / 5;
+    if (avg < 9) volPred = 1; // Điểm trung bình thấp -> Hồi Tài
+    else if (avg > 12) volPred = 0; // Điểm trung bình cao -> Hồi Xỉu
 
-    // --- HỆ THỐNG TRỌNG SỐ (VOTING SYSTEM) ---
-    let votesTai = 0;
-    let votesXiu = 0;
-    let activeEngines = 0;
+    // --- VOTING SYSTEM ---
+    let votesTai = 0, votesXiu = 0, active = 0;
+    if (patternPred !== -1) { (patternPred === 1 ? votesTai++ : votesXiu++); active++; }
+    if (momentumPred !== -1) { (momentumPred === 1 ? votesTai++ : votesXiu++); active++; }
+    if (volPred !== -1) { (volPred === 1 ? votesTai++ : votesXiu++); active++; }
 
-    if (patternPred !== -1) { (patternPred === 1 ? votesTai++ : votesXiu++); activeEngines++; }
-    if (momentumPred !== -1) { (momentumPred === 1 ? votesTai++ : votesXiu++); activeEngines++; }
-    if (meanPred !== -1) { (meanPred === 1 ? votesTai++ : votesXiu++); activeEngines++; }
-
-    let finalPred = -1;
-    let confidence = 50;
-    
+    let finalPred = -1, confidence = 50;
     if (votesTai > votesXiu) {
         finalPred = 1;
-        confidence = 60 + (votesTai / activeEngines) * 30;
+        confidence = 65 + (votesTai / (active || 1)) * 25;
     } else if (votesXiu > votesTai) {
         finalPred = 0;
-        confidence = 60 + (votesXiu / activeEngines) * 30;
+        confidence = 65 + (votesXiu / (active || 1)) * 25;
     }
 
-    // Đặc biệt: Nếu điểm vừa ra là cực trị (3, 4, 17, 18) -> Tăng mạnh tin cậy hồi quy
-    if (lastPoint <= 4) { finalPred = 1; confidence = 95; }
-    if (lastPoint >= 17) { finalPred = 0; confidence = 95; }
+    // Chốt chặn cực trị
+    if (lastPoint <= 5) { finalPred = 1; confidence = 95; }
+    if (lastPoint >= 16) { finalPred = 0; confidence = 95; }
 
     return { 
         pred: finalPred, 
         conf: Math.min(Math.round(confidence), 98), 
-        logic: activeEngines === 3 ? "Đồng thuận cao" : "Phân tích đa chiều" 
+        logic: streak >= 3 ? "Bắt cầu bệt" : (active >= 2 ? "Phân tích cầu" : "Theo xu hướng")
     };
-}
-
-function calculateEMA(data, period) {
-    let ema = data[0];
-    const k = 2 / (period + 1);
-    for (let i = 1; i < data.length; i++) ema = data[i] * k + ema * (1 - k);
-    return ema;
 }
 
 app.get('/api/data', async (req, res) => {
@@ -97,16 +79,11 @@ app.get('/api/data', async (req, res) => {
             { timeout: 4000 }
         );
         
-        const list = response.data.list;
+        const list = response.data.list; // API trả về 15 phiên mới nhất
         const latest = list[0];
         
-        // Cập nhật bộ nhớ đệm lịch sử
-        list.reverse().forEach(s => {
-            if (!fullHistory.find(h => h.id === s.id)) {
-                fullHistory.push(s);
-            }
-        });
-        if (fullHistory.length > 100) fullHistory = fullHistory.slice(-100);
+        // Cập nhật lịch sử: Luôn đồng bộ với 15 phiên mới nhất từ API
+        fullHistory = [...list].reverse(); 
         
         if (currentPhase !== latest.id) {
             currentPhase = latest.id;
@@ -117,7 +94,7 @@ app.get('/api/data', async (req, res) => {
                 last.win = (last.side === last.real);
             }
 
-            const analysis = engineV3(fullHistory);
+            const analysis = engineV3(list);
             predictionHistory.unshift({
                 phien: latest.id + 1,
                 side: analysis.pred === 1 ? 'Tài' : (analysis.pred === 0 ? 'Xỉu' : 'N/A'),
@@ -147,4 +124,4 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-app.listen(PORT, () => console.log('Engine V3.0 Online'));
+app.listen(PORT, () => console.log('Engine V3.1 High-Speed Online'));
