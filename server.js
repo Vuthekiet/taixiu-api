@@ -4,46 +4,90 @@ const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Cấu hình phục vụ file tĩnh từ thư mục hiện tại
 app.use(express.static(__dirname));
 
+let fullHistory = []; // Lưu trữ tối đa 100 phiên
 let predictionHistory = [];
 let currentPhase = 0;
 
 /**
- * CORE LOGIC: Phân tích xu hướng dựa trên 3 chỉ số chính
+ * ENGINE V3.0 - QUANTUM MULTI-STRATEGY
  */
-function analyze(sessions) {
-    if (!sessions || sessions.length < 15) return { pred: -1, conf: 0, logic: "Nạp dữ liệu..." };
+function engineV3(sessions) {
+    if (sessions.length < 30) return { pred: -1, conf: 0, logic: "Đang nạp dữ liệu sâu..." };
 
-    const pts = sessions.slice(0, 15).map(s => s.point).reverse();
-    const res = sessions.slice(0, 15).map(s => s.resultTruyenThong === 'TAI' ? 1 : 0);
+    const pts = sessions.map(s => s.point).reverse();
+    const res = sessions.map(s => s.resultTruyenThong === 'TAI' ? 1 : 0);
+    const lastResult = res[res.length - 1];
+    const lastPoint = pts[pts.length - 1];
 
-    // 1. EMA (Short-term trend)
-    let ema = pts[0];
-    const k = 2 / (5 + 1);
-    for (let i = 1; i < pts.length; i++) ema = pts[i] * k + ema * (1 - k);
+    // --- ENGINE 1: PATTERN RECOGNITION (Tìm kiếm lịch sử) ---
+    let patternPred = -1;
+    const currentPattern = res.slice(-4).join('');
+    let matches = { 1: 0, 0: 0 };
+    for (let i = 0; i < res.length - 5; i++) {
+        const p = res.slice(i, i + 4).join('');
+        if (p === currentPattern) {
+            matches[res[i + 4]]++;
+        }
+    }
+    if (matches[1] > matches[0]) patternPred = 1;
+    else if (matches[0] > matches[1]) patternPred = 0;
 
-    // 2. Momentum (Xác định bệt/đảo)
-    let streak = 1;
-    for (let i = 0; i < res.length - 1; i++) {
-        if (res[i] === res[i+1]) streak++;
+    // --- ENGINE 2: DYNAMIC MOMENTUM (Bắt cầu bệt/đảo) ---
+    let momentumPred = -1;
+    let streak = 0;
+    for (let i = res.length - 1; i >= 0; i--) {
+        if (res[i] === lastResult) streak++;
         else break;
     }
+    // Nếu bệt >= 3: Đánh thuận (Trend following)
+    // Nếu bệt 1-1 liên tiếp >= 4: Đánh đảo (Anti-trend)
+    if (streak >= 3) momentumPred = lastResult;
+    
+    // --- ENGINE 3: MEAN REVERSION (Hồi quy điểm số) ---
+    let meanPred = -1;
+    const emaShort = calculateEMA(pts, 3);
+    const emaLong = calculateEMA(pts, 7);
+    if (emaShort > emaLong && lastPoint < 14) meanPred = 1;
+    else if (emaShort < emaLong && lastPoint > 7) meanPred = 0;
 
-    let p = -1, c = 50, l = "";
+    // --- HỆ THỐNG TRỌNG SỐ (VOTING SYSTEM) ---
+    let votesTai = 0;
+    let votesXiu = 0;
+    let activeEngines = 0;
 
-    if (streak >= 3) {
-        p = res[0]; // Theo bệt
-        c = 70 + (streak * 5);
-        l = "Bệt " + streak + " tay";
-    } else {
-        p = ema > 10.5 ? 0 : 1; // Hồi quy
-        c = 65 + Math.abs(ema - 10.5) * 6;
-        l = "EMA " + ema.toFixed(1);
+    if (patternPred !== -1) { (patternPred === 1 ? votesTai++ : votesXiu++); activeEngines++; }
+    if (momentumPred !== -1) { (momentumPred === 1 ? votesTai++ : votesXiu++); activeEngines++; }
+    if (meanPred !== -1) { (meanPred === 1 ? votesTai++ : votesXiu++); activeEngines++; }
+
+    let finalPred = -1;
+    let confidence = 50;
+    
+    if (votesTai > votesXiu) {
+        finalPred = 1;
+        confidence = 60 + (votesTai / activeEngines) * 30;
+    } else if (votesXiu > votesTai) {
+        finalPred = 0;
+        confidence = 60 + (votesXiu / activeEngines) * 30;
     }
 
-    return { pred: p, conf: Math.min(Math.round(c), 95), logic: l };
+    // Đặc biệt: Nếu điểm vừa ra là cực trị (3, 4, 17, 18) -> Tăng mạnh tin cậy hồi quy
+    if (lastPoint <= 4) { finalPred = 1; confidence = 95; }
+    if (lastPoint >= 17) { finalPred = 0; confidence = 95; }
+
+    return { 
+        pred: finalPred, 
+        conf: Math.min(Math.round(confidence), 98), 
+        logic: activeEngines === 3 ? "Đồng thuận cao" : "Phân tích đa chiều" 
+    };
+}
+
+function calculateEMA(data, period) {
+    let ema = data[0];
+    const k = 2 / (period + 1);
+    for (let i = 1; i < data.length; i++) ema = data[i] * k + ema * (1 - k);
+    return ema;
 }
 
 app.get('/api/data', async (req, res) => {
@@ -56,6 +100,14 @@ app.get('/api/data', async (req, res) => {
         const list = response.data.list;
         const latest = list[0];
         
+        // Cập nhật bộ nhớ đệm lịch sử
+        list.reverse().forEach(s => {
+            if (!fullHistory.find(h => h.id === s.id)) {
+                fullHistory.push(s);
+            }
+        });
+        if (fullHistory.length > 100) fullHistory = fullHistory.slice(-100);
+        
         if (currentPhase !== latest.id) {
             currentPhase = latest.id;
             
@@ -65,7 +117,7 @@ app.get('/api/data', async (req, res) => {
                 last.win = (last.side === last.real);
             }
 
-            const analysis = analyze(list);
+            const analysis = engineV3(fullHistory);
             predictionHistory.unshift({
                 phien: latest.id + 1,
                 side: analysis.pred === 1 ? 'Tài' : (analysis.pred === 0 ? 'Xỉu' : 'N/A'),
@@ -74,7 +126,7 @@ app.get('/api/data', async (req, res) => {
                 conf: analysis.conf,
                 logic: analysis.logic
             });
-            if (predictionHistory.length > 20) predictionHistory.pop();
+            if (predictionHistory.length > 50) predictionHistory.pop();
         }
 
         const wins = predictionHistory.filter(h => h.win === true).length;
@@ -91,9 +143,8 @@ app.get('/api/data', async (req, res) => {
     }
 });
 
-// Route chính trả về giao diện file index.html
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-app.listen(PORT, () => console.log('Server is running...'));
+app.listen(PORT, () => console.log('Engine V3.0 Online'));
