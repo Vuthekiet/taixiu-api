@@ -1,10 +1,10 @@
 {
-  "name": "taixiu-md5-predictor",
-  "version": "1.0.0",
-  "description": "Tai Xiu MD5 Predictor Pro",
-  "main": "optimized_app.js",
+  "name": "md5-pro-predictor",
+  "version": "2.0.0",
+  "description": "Professional MD5 Predictor with Minimalist UI",
+  "main": "server.js",
   "scripts": {
-    "start": "node optimized_app.js"
+    "start": "node server.js"
   },
   "dependencies": {
     "express": "^4.18.2",
