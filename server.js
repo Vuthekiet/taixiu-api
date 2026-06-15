@@ -7,102 +7,76 @@ let sessionHistory = [];
 let predictionHistory = [];
 let currentPhase = 0;
 
-function gaussianNoiseFilter(sessions) {
-    if (sessions.length < 15) return -1;
-    const points = sessions.slice(0, 15).map(s => s.point);
-    const mean = points.reduce((a, b) => a + b, 0) / 15;
-    const variance = points.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / 15;
-    const stdDev = Math.sqrt(variance);
-    if (stdDev < 1.2) {
-        const lastResult = sessions[0].resultTruyenThong === 'TAI' ? 1 : 0;
-        return lastResult === 1 ? 0 : 1;
-    }
-    if (stdDev > 5.5) {
-        if (mean > 13.5) return 0;
-        if (mean < 7.5) return 1;
-    }
-    return -1;
-}
-
-function pointVelocity(sessions) {
-    if (sessions.length < 8) return -1;
-    let velocity = 0;
-    let direction = 0;
-    for (let i = 0; i < 7; i++) {
-        const diff = sessions[i].point - sessions[i+1].point;
-        velocity += Math.abs(diff);
-        if (i === 0) direction = diff > 0 ? 1 : -1;
-    }
-    const avgVelocity = velocity / 7;
-    if (avgVelocity > 2.5) return direction > 0 ? 0 : 1;
-    return -1;
-}
-
-function diceFallAnalysis(sessions) {
-    if (sessions.length < 10) return -1;
-    const points = sessions.slice(0, 10).map(s => s.point);
-    let monotonic = true;
-    let direction = 0;
-    for (let i = 0; i < 9; i++) {
-        const diff = points[i] - points[i+1];
-        if (i === 0) direction = diff > 0 ? 1 : -1;
-        if ((diff > 0 && direction < 0) || (diff < 0 && direction > 0)) {
-            monotonic = false;
-            break;
-        }
-    }
-    if (monotonic && direction !== 0) {
-        const lastResult = sessions[0].resultTruyenThong === 'TAI' ? 1 : 0;
-        return lastResult === 1 ? 0 : 1;
-    }
-    return -1;
-}
-
-function markovChainPattern(sessions) {
-    if (sessions.length < 20) return -1;
-    const pattern =
-        (sessions[0].resultTruyenThong === 'TAI' ? '1' : '0') +
-        (sessions[1].resultTruyenThong === 'TAI' ? '1' : '0') +
-        (sessions[2].resultTruyenThong === 'TAI' ? '1' : '0');
-    let matches = { tai: 0, xiu: 0 };
-    for (let i = 3; i < sessions.length - 3; i++) {
-        const checkPattern =
-            (sessions[i].resultTruyenThong === 'TAI' ? '1' : '0') +
-            (sessions[i+1].resultTruyenThong === 'TAI' ? '1' : '0') +
-            (sessions[i+2].resultTruyenThong === 'TAI' ? '1' : '0');
-        if (checkPattern === pattern && i + 3 < sessions.length) {
-            if (sessions[i+3].resultTruyenThong === 'TAI') matches.tai++;
-            else matches.xiu++;
-        }
-    }
-    if (matches.tai > matches.xiu && matches.tai >= 2) return 1;
-    if (matches.xiu > matches.tai && matches.xiu >= 2) return 0;
-    return -1;
-}
-
+/**
+ * THUẬT TOÁN TỐI ƯU HÓA (OPTIMIZED PREDICTOR)
+ * Kết hợp EMA, RSI và Pattern Recognition
+ */
 function predictNextResult(sessions) {
     if (!sessions || sessions.length < 20) {
-        return { pred: -1, conf: 50, logic: "Chua du du lieu" };
+        return { pred: -1, conf: 50, logic: "Đang thu thập dữ liệu (cần >20 phiên)" };
     }
-    let predictions = [];
-    let confidences = [];
-    let logics = [];
-    const gaussPred = gaussianNoiseFilter(sessions);
-    if (gaussPred !== -1) { predictions.push(gaussPred); confidences.push(88); logics.push("GAUSSIAN: Do lech chuan diem"); }
-    const velPred = pointVelocity(sessions);
-    if (velPred !== -1) { predictions.push(velPred); confidences.push(85); logics.push("VELOCITY: Van toc diem roi"); }
-    const dicePred = diceFallAnalysis(sessions);
-    if (dicePred !== -1) { predictions.push(dicePred); confidences.push(87); logics.push("DICE FALL: Chuoi diem don dieu"); }
-    const markovPred = markovChainPattern(sessions);
-    if (markovPred !== -1) { predictions.push(markovPred); confidences.push(84); logics.push("MARKOV: Nhan dien pattern"); }
-    if (predictions.length > 0) {
-        const taiCount = predictions.filter(p => p === 1).length;
-        const finalPred = taiCount > (predictions.length - taiCount) ? 1 : 0;
-        const avgConf = Math.round(confidences.reduce((a, b) => a + b, 0) / confidences.length);
-        const maxConfIdx = confidences.indexOf(Math.max(...confidences));
-        return { pred: finalPred, conf: avgConf, logic: logics[maxConfIdx] };
+
+    const points = sessions.slice(0, 20).map(s => s.point).reverse();
+    const results = sessions.slice(0, 20).map(s => s.resultTruyenThong === 'TAI' ? 1 : 0);
+
+    // 1. Tính EMA (Exponential Moving Average) - Chu kỳ 5
+    let ema5 = points[0];
+    const alpha = 2 / (5 + 1);
+    for (let i = 1; i < points.length; i++) {
+        ema5 = points[i] * alpha + ema5 * (1 - alpha);
     }
-    return { pred: -1, conf: 50, logic: "Khong co du doan" };
+
+    // 2. Phân tích RSI (Relative Strength Index) cho điểm số
+    let gains = 0, losses = 0;
+    for (let i = 1; i < points.length; i++) {
+        let diff = points[i] - points[i-1];
+        if (diff > 0) gains += diff;
+        else losses -= diff;
+    }
+    const avgGain = gains / 19;
+    const avgLoss = losses / 19;
+    const rs = avgGain / (avgLoss || 1);
+    const rsi = 100 - (100 / (1 + rs));
+
+    // 3. Nhận diện Cầu (Pattern Recognition)
+    let streak = 1;
+    for (let i = 0; i < results.length - 1; i++) {
+        if (results[i] === results[i+1]) streak++;
+        else break;
+    }
+
+    let finalPred = -1;
+    let confidence = 50;
+    let logic = "";
+
+    // CHIẾN THUẬT QUYẾT ĐỊNH
+    if (streak >= 3) {
+        // Ưu tiên đánh theo bệt (Trend Following)
+        finalPred = results[0];
+        confidence = 75 + (streak * 2);
+        logic = `Cầu bệt ${streak} tay: Đánh thuận`;
+    } else if (rsi > 65) {
+        // Quá mua (Điểm quá cao) -> Hồi quy về XIU
+        finalPred = 0;
+        confidence = 65 + (rsi - 65);
+        logic = `RSI cao (${rsi.toFixed(1)}): Hồi quy XIU`;
+    } else if (rsi < 35) {
+        // Quá bán (Điểm quá thấp) -> Hồi quy về TAI
+        finalPred = 1;
+        confidence = 65 + (35 - rsi);
+        logic = `RSI thấp (${rsi.toFixed(1)}): Hồi quy TAI`;
+    } else {
+        // Đánh theo xu hướng EMA so với trung bình 10.5
+        finalPred = ema5 > 10.5 ? 0 : 1;
+        confidence = 60 + Math.abs(ema5 - 10.5) * 5;
+        logic = `EMA (${ema5.toFixed(1)}) hướng về ${finalPred === 1 ? 'TAI' : 'XIU'}`;
+    }
+
+    return { 
+        pred: finalPred, 
+        conf: Math.min(Math.round(confidence), 98), 
+        logic: logic 
+    };
 }
 
 app.get("/api/taixiu", async (req, res) => {
@@ -111,199 +85,160 @@ app.get("/api/taixiu", async (req, res) => {
             "https://wtxmd52.tele68.com/v1/txmd5/lite-sessions?cp=R&cl=R&pf=web&at=910a2c78e3eb1137d7ef50c8ddea98d2",
             { timeout: 5000 }
         );
+        
         if (!response.data || !response.data.list) throw new Error("Invalid API response");
+        
         const sessions = response.data.list;
         const latest = sessions[0];
+        
         if (currentPhase !== latest.id) {
             currentPhase = latest.id;
-            sessionHistory.unshift(latest);
-            sessionHistory = sessionHistory.slice(0, 100);
-            const prediction = predictNextResult(sessions);
+            
+            // Cập nhật kết quả cho dự đoán trước đó
             if (predictionHistory.length > 0) {
-                const last = predictionHistory[0];
-                last.ketQua = latest.resultTruyenThong === 'TAI' ? "Tai" : "Xiu";
-                last.dung = (last.duDoan === "Tai" && latest.resultTruyenThong === 'TAI') ||
-                            (last.duDoan === "Xiu" && latest.resultTruyenThong === 'XIU');
+                const lastPred = predictionHistory[0];
+                if (lastPred.phien === latest.id) {
+                    lastPred.ketQua = latest.resultTruyenThong === 'TAI' ? "Tai" : "Xiu";
+                    lastPred.dung = (lastPred.duDoan === lastPred.ketQua);
+                }
             }
+
+            // Tạo dự đoán mới cho phiên tiếp theo
+            const prediction = predictNextResult(sessions);
             predictionHistory.unshift({
                 phien: latest.id + 1,
-                duDoan: prediction.pred === 1 ? "Tai" : "Xiu",
+                duDoan: prediction.pred === 1 ? "Tai" : (prediction.pred === 0 ? "Xiu" : "N/A"),
                 ketQua: null,
                 dung: null,
                 doTinCay: prediction.conf,
                 logic: prediction.logic,
                 timestamp: new Date().toISOString()
             });
-            predictionHistory = predictionHistory.slice(0, 100);
+            
+            if (predictionHistory.length > 100) predictionHistory.pop();
         }
-        const recent10 = predictionHistory.slice(0, 10);
-        const recent20 = predictionHistory.slice(0, 20);
-        const win10 = recent10.filter(p => p.dung).length;
-        const win20 = recent20.filter(p => p.dung).length;
+
+        const wins = predictionHistory.filter(p => p.dung === true).length;
+        const total = predictionHistory.filter(p => p.dung !== null).length;
+
         res.json({
             currentPhase: latest.id,
             dices: latest.dices,
             point: latest.point,
             result: latest.resultTruyenThong === 'TAI' ? "Tai" : "Xiu",
-            nextPrediction: predictionHistory[0] || null,
-            predictionHistory: predictionHistory.slice(0, 20),
+            nextPrediction: predictionHistory[0],
             stats: {
-                total: predictionHistory.length,
-                wins: predictionHistory.filter(p => p.dung).length,
-                winRate10: Math.round((win10 / Math.max(recent10.length, 1)) * 100) + "%",
-                winRate20: Math.round((win20 / Math.max(recent20.length, 1)) * 100) + "%"
-            }
+                total: total,
+                wins: wins,
+                winRate: total > 0 ? Math.round((wins / total) * 100) + "%" : "0%"
+            },
+            history: predictionHistory.slice(0, 10)
         });
     } catch (error) {
-        console.error("API Error:", error.message);
         res.status(500).json({ error: error.message });
     }
 });
 
 app.get("/", (req, res) => {
-    const html = '<!DOCTYPE html>' +
-'<html lang="vi">' +
-'<head>' +
-'<meta charset="UTF-8">' +
-'<meta name="viewport" content="width=device-width, initial-scale=1.0">' +
-'<title>Tai Xiu Predictor Dashboard</title>' +
-'<style>' +
-'* { margin: 0; padding: 0; box-sizing: border-box; }' +
-'body { font-family: Segoe UI, sans-serif; background: linear-gradient(135deg, #0a0e19 0%, #1a1f3a 100%); color: #fff; min-height: 100vh; padding: 20px; }' +
-'.container { max-width: 1400px; margin: 0 auto; }' +
-'header { text-align: center; margin-bottom: 30px; padding: 20px; background: rgba(0,255,136,0.1); border: 2px solid #00ff88; border-radius: 12px; box-shadow: 0 0 20px rgba(0,255,136,0.3); }' +
-'header h1 { font-size: 32px; color: #00ff88; text-shadow: 0 0 10px #00ff88; margin-bottom: 5px; }' +
-'header p { color: #aaa; font-size: 14px; }' +
-'.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 30px; }' +
-'@media (max-width: 1024px) { .grid { grid-template-columns: 1fr; } }' +
-'.card { background: rgba(20,25,40,0.8); border: 2px solid rgba(0,255,136,0.3); border-radius: 12px; padding: 20px; backdrop-filter: blur(10px); }' +
-'.card.current { border-color: #00ff88; box-shadow: 0 0 30px rgba(0,255,136,0.4); }' +
-'.card.prediction { border-color: #ffd966; box-shadow: 0 0 30px rgba(255,217,102,0.4); }' +
-'.card h2 { font-size: 18px; color: #00ff88; margin-bottom: 15px; text-transform: uppercase; letter-spacing: 2px; }' +
-'.phase-info { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; padding: 10px; background: rgba(0,0,0,0.3); border-radius: 8px; }' +
-'.phase-label { color: #aaa; font-size: 12px; }' +
-'.phase-value { font-size: 20px; font-weight: bold; color: #00ff88; }' +
-'.dices-display { display: flex; justify-content: center; gap: 15px; margin: 20px 0; }' +
-'.dice { width: 60px; height: 60px; background: linear-gradient(135deg, #1a1f3a, #0a0e19); border: 2px solid #00ff88; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 28px; font-weight: bold; color: #00ff88; }' +
-'.point-display { text-align: center; padding: 15px; background: rgba(0,0,0,0.3); border-radius: 8px; margin: 15px 0; }' +
-'.point-label { color: #aaa; font-size: 12px; margin-bottom: 5px; }' +
-'.point-value { font-size: 32px; font-weight: bold; color: #ffd966; }' +
-'.result-display { display: flex; gap: 10px; margin: 15px 0; }' +
-'.result-btn { flex: 1; padding: 15px; border: 2px solid; border-radius: 8px; font-size: 18px; font-weight: bold; text-transform: uppercase; letter-spacing: 2px; text-align: center; }' +
-'.result-btn.tai { border-color: #00ff88; background: rgba(0,255,136,0.1); color: #00ff88; }' +
-'.result-btn.xiu { border-color: #ff4466; background: rgba(255,68,102,0.1); color: #ff4466; }' +
-'.result-btn.active { box-shadow: 0 0 25px rgba(0,255,136,0.5); }' +
-'.prediction-result { text-align: center; padding: 20px; background: rgba(0,0,0,0.3); border-radius: 8px; margin: 15px 0; }' +
-'.prediction-value { font-size: 36px; font-weight: bold; margin: 10px 0; text-transform: uppercase; letter-spacing: 3px; }' +
-'.prediction-value.tai { color: #00ff88; text-shadow: 0 0 15px #00ff88; }' +
-'.prediction-value.xiu { color: #ff4466; text-shadow: 0 0 15px #ff4466; }' +
-'.confidence-bar { margin: 15px 0; }' +
-'.confidence-label { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 12px; color: #aaa; }' +
-'.progress-bar { width: 100%; height: 8px; background: rgba(0,0,0,0.5); border-radius: 4px; overflow: hidden; border: 1px solid rgba(0,255,136,0.2); }' +
-'.progress-fill { height: 100%; background: linear-gradient(90deg, #00ff88, #ffd966); transition: width 0.3s ease; }' +
-'.logic-info { padding: 10px; background: rgba(0,0,0,0.3); border-radius: 8px; font-size: 12px; color: #aaa; margin-top: 10px; border-left: 3px solid #ffd966; }' +
-'.stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 20px; }' +
-'@media (max-width: 768px) { .stats-grid { grid-template-columns: repeat(2, 1fr); } }' +
-'.stat-box { background: rgba(0,0,0,0.3); border: 1px solid rgba(0,255,136,0.2); border-radius: 8px; padding: 12px; text-align: center; }' +
-'.stat-label { font-size: 11px; color: #aaa; margin-bottom: 5px; }' +
-'.stat-value { font-size: 18px; font-weight: bold; color: #00ff88; }' +
-'.history-table { width: 100%; border-collapse: collapse; margin-top: 20px; }' +
-'.history-table th { background: rgba(0,255,136,0.1); border: 1px solid rgba(0,255,136,0.2); padding: 10px; text-align: left; font-size: 12px; color: #00ff88; text-transform: uppercase; }' +
-'.history-table td { border: 1px solid rgba(0,255,136,0.1); padding: 10px; font-size: 12px; }' +
-'.history-table tr:hover { background: rgba(0,255,136,0.05); }' +
-'.status-win { color: #00ff88; font-weight: bold; }' +
-'.status-lose { color: #ff4466; font-weight: bold; }' +
-'.loading { text-align: center; padding: 20px; color: #aaa; }' +
-'.spinner { display: inline-block; width: 20px; height: 20px; border: 3px solid rgba(0,255,136,0.3); border-top-color: #00ff88; border-radius: 50%; animation: spin 1s linear infinite; }' +
-'@keyframes spin { to { transform: rotate(360deg); } }' +
-'.update-time { text-align: center; margin-top: 20px; font-size: 12px; color: #666; }' +
-'</style>' +
-'</head>' +
-'<body>' +
-'<div class="container">' +
-'<header>' +
-'<h1>🎲 TAI XIU PREDICTOR</h1>' +
-'<p>Dashboard Du Doan Real-Time | Thuat Toan 4 Thanh Phan</p>' +
-'</header>' +
-'<div class="grid">' +
-'<div class="card current">' +
-'<h2>📊 Phien Hien Tai</h2>' +
-'<div class="phase-info"><span class="phase-label">Phien #</span><span class="phase-value" id="currentPhase">-</span></div>' +
-'<div class="dices-display" id="dicesDisplay"><div class="dice">-</div><div class="dice">-</div><div class="dice">-</div></div>' +
-'<div class="point-display"><div class="point-label">Tong Diem</div><div class="point-value" id="pointValue">-</div></div>' +
-'<div class="result-display"><div class="result-btn tai" id="resultTai">Tai</div><div class="result-btn xiu" id="resultXiu">Xiu</div></div>' +
-'</div>' +
-'<div class="card prediction">' +
-'<h2>🔮 Du Doan Phien Tiep Theo</h2>' +
-'<div class="prediction-result"><div style="font-size:12px;color:#aaa;margin-bottom:10px">KET QUA DU DOAN</div><div class="prediction-value" id="predictionValue">-</div></div>' +
-'<div class="confidence-bar"><div class="confidence-label"><span>Do Tin Cay</span><span id="confidencePercent">0%</span></div><div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:0%"></div></div></div>' +
-'<div class="logic-info" id="logicInfo">Dang tai du lieu...</div>' +
-'<div class="stats-grid">' +
-'<div class="stat-box"><div class="stat-label">Tong Phien</div><div class="stat-value" id="totalPhases">0</div></div>' +
-'<div class="stat-box"><div class="stat-label">Thang</div><div class="stat-value" id="winCount">0</div></div>' +
-'<div class="stat-box"><div class="stat-label">WinRate 10</div><div class="stat-value" id="winRate10">0%</div></div>' +
-'<div class="stat-box"><div class="stat-label">WinRate 20</div><div class="stat-value" id="winRate20">0%</div></div>' +
-'</div>' +
-'</div>' +
-'</div>' +
-'<div class="card">' +
-'<h2>📈 Lich Su Du Doan (20 Phien Gan Nhat)</h2>' +
-'<div id="historyContainer" class="loading"><div class="spinner"></div> Dang tai du lieu...</div>' +
-'</div>' +
-'<div class="update-time">Cap nhat tu dong moi 3 giay | Lan cap nhat cuoi: <span id="lastUpdate">-</span></div>' +
-'</div>' +
-'<script>' +
-'async function updateDashboard() {' +
-'  try {' +
-'    var response = await fetch("/api/taixiu");' +
-'    var data = await response.json();' +
-'    document.getElementById("currentPhase").textContent = data.currentPhase;' +
-'    var dicesDisplay = document.getElementById("dicesDisplay");' +
-'    dicesDisplay.innerHTML = data.dices.map(function(d) { return "<div class=\'dice\'>" + d + "</div>"; }).join("");' +
-'    document.getElementById("pointValue").textContent = data.point;' +
-'    document.getElementById("resultTai").classList.remove("active");' +
-'    document.getElementById("resultXiu").classList.remove("active");' +
-'    if (data.result === "Tai") document.getElementById("resultTai").classList.add("active");' +
-'    else document.getElementById("resultXiu").classList.add("active");' +
-'    if (data.nextPrediction) {' +
-'      var predValue = document.getElementById("predictionValue");' +
-'      predValue.textContent = data.nextPrediction.duDoan;' +
-'      predValue.className = "prediction-value " + (data.nextPrediction.duDoan === "Tai" ? "tai" : "xiu");' +
-'      document.getElementById("confidencePercent").textContent = data.nextPrediction.doTinCay + "%";' +
-'      document.getElementById("progressFill").style.width = data.nextPrediction.doTinCay + "%";' +
-'      document.getElementById("logicInfo").textContent = "Thuat toan: " + data.nextPrediction.logic;' +
-'    }' +
-'    document.getElementById("totalPhases").textContent = data.stats.total;' +
-'    document.getElementById("winCount").textContent = data.stats.wins;' +
-'    document.getElementById("winRate10").textContent = data.stats.winRate10;' +
-'    document.getElementById("winRate20").textContent = data.stats.winRate20;' +
-'    var historyContainer = document.getElementById("historyContainer");' +
-'    if (data.predictionHistory && data.predictionHistory.length > 0) {' +
-'      var html = "<table class=\'history-table\'><thead><tr><th>Phien</th><th>Du Doan</th><th>Ket Qua</th><th>Ket Luan</th><th>Do Tin Cay</th><th>Logic</th></tr></thead><tbody>";' +
-'      data.predictionHistory.forEach(function(pred) {' +
-'        if (pred.ketQua === null) return;' +
-'        var sc = pred.dung ? "status-win" : "status-lose";' +
-'        var st = pred.dung ? "THANG" : "THUA";' +
-'        html += "<tr><td>#" + pred.phien + "</td><td>" + pred.duDoan + "</td><td>" + pred.ketQua + "</td><td class=\'" + sc + "\'>" + st + "</td><td>" + pred.doTinCay + "%</td><td style=\'font-size:11px;color:#aaa\'>" + pred.logic + "</td></tr>";' +
-'      });' +
-'      html += "</tbody></table>";' +
-'      historyContainer.innerHTML = html;' +
-'    }' +
-'    document.getElementById("lastUpdate").textContent = new Date().toLocaleTimeString("vi-VN");' +
-'  } catch(e) { console.error("Error:", e); }' +
-'}' +
-'updateDashboard();' +
-'setInterval(updateDashboard, 3000);' +
-'</script>' +
-'</body></html>';
-    res.send(html);
+    res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Siêu Công Cụ Tài Xỉu MD5</title>
+        <meta charset="UTF-8">
+        <style>
+            body { font-family: 'Segoe UI', sans-serif; background: #0f172a; color: white; display: flex; flex-direction: column; align-items: center; padding: 20px; }
+            .card { background: #1e293b; border-radius: 15px; padding: 25px; width: 100%; max-width: 600px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); border: 1px solid #334155; margin-bottom: 20px; }
+            .highlight { color: #38bdf8; font-weight: bold; font-size: 24px; }
+            .prediction { font-size: 48px; text-align: center; margin: 20px 0; text-transform: uppercase; text-shadow: 0 0 20px rgba(56, 189, 248, 0.5); }
+            .tai { color: #4ade80; }
+            .xiu { color: #f87171; }
+            .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; text-align: center; }
+            .stat-box { background: #0f172a; padding: 10px; border-radius: 10px; }
+            .progress-bg { background: #334155; height: 10px; border-radius: 5px; margin: 10px 0; }
+            .progress-fill { background: #38bdf8; height: 100%; border-radius: 5px; transition: width 0.5s; }
+            table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 14px; }
+            th, td { padding: 10px; border-bottom: 1px solid #334155; text-align: left; }
+            .win { color: #4ade80; }
+            .lose { color: #f87171; }
+        </style>
+    </head>
+    <body>
+        <h1>🚀 MD5 PREDICTOR PRO</h1>
+        <div class="card">
+            <div style="display: flex; justify-content: space-between;">
+                <span>Phiên hiện tại: <span id="currentId" class="highlight">-</span></span>
+                <span>Kết quả: <span id="currentRes" class="highlight">-</span></span>
+            </div>
+            <div style="text-align: center; margin-top: 10px;">
+                Dices: <span id="dices" style="letter-spacing: 5px; font-size: 20px;">- - -</span>
+            </div>
+        </div>
+
+        <div class="card" style="border: 2px solid #38bdf8;">
+            <h3 style="text-align: center; margin: 0; color: #94a3b8;">DỰ ĐOÁN PHIÊN <span id="nextId">-</span></h3>
+            <div id="prediction" class="prediction">-</div>
+            <div class="progress-bg"><div id="confBar" class="progress-fill" style="width: 0%"></div></div>
+            <div style="display: flex; justify-content: space-between; font-size: 12px; color: #94a3b8;">
+                <span>Độ tin cậy: <span id="confText">0%</span></span>
+                <span>Logic: <span id="logicText">-</span></span>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="stats">
+                <div class="stat-box"><div>Tổng phiên</div><div id="total" class="highlight">0</div></div>
+                <div class="stat-box"><div>Tỉ lệ thắng</div><div id="winRate" class="highlight" style="color: #4ade80;">0%</div></div>
+            </div>
+            <table id="historyTable">
+                <thead><tr><th>Phiên</th><th>Dự đoán</th><th>Kết quả</th><th>Trạng thái</th></tr></thead>
+                <tbody></tbody>
+            </table>
+        </div>
+
+        <script>
+            async function update() {
+                try {
+                    const res = await fetch('/api/taixiu');
+                    const data = await res.json();
+                    
+                    document.getElementById('currentId').innerText = data.currentPhase;
+                    document.getElementById('currentRes').innerText = data.result + ' (' + data.point + ')';
+                    document.getElementById('dices').innerText = data.dices.join('   ');
+                    
+                    if (data.nextPrediction) {
+                        document.getElementById('nextId').innerText = data.nextPrediction.phien;
+                        const predDiv = document.getElementById('prediction');
+                        predDiv.innerText = data.nextPrediction.duDoan;
+                        predDiv.className = 'prediction ' + (data.nextPrediction.duDoan === 'Tai' ? 'tai' : 'xiu');
+                        
+                        document.getElementById('confBar').style.width = data.nextPrediction.doTinCay + '%';
+                        document.getElementById('confText').innerText = data.nextPrediction.doTinCay + '%';
+                        document.getElementById('logicText').innerText = data.nextPrediction.logic;
+                    }
+                    
+                    document.getElementById('total').innerText = data.stats.total;
+                    document.getElementById('winRate').innerText = data.stats.winRate;
+                    
+                    const tbody = document.querySelector('#historyTable tbody');
+                    tbody.innerHTML = data.history.map(h => \`
+                        <tr>
+                            <td>\${h.phien}</td>
+                            <td class="\${h.duDoan.toLowerCase()}">\${h.duDoan}</td>
+                            <td>\${h.ketQua || '...'}</td>
+                            <td class="\${h.dung === true ? 'win' : (h.dung === false ? 'lose' : '')}">
+                                \${h.dung === true ? 'THẮNG' : (h.dung === false ? 'THUA' : 'Đang chờ')}
+                            </td>
+                        </tr>
+                    \`).join('');
+                } catch (e) {}
+            }
+            setInterval(update, 3000);
+            update();
+        </script>
+    </body>
+    </html>
+    `);
 });
 
-app.use(function(err, req, res, next) {
-    console.error(err);
-    res.status(500).json({ error: "Internal Server Error" });
-});
-
-app.listen(PORT, function() {
-    console.log("Tai Xiu Predictor running on port " + PORT);
-});
+app.listen(PORT, () => console.log(\`Server running on port \${PORT}\`));
