@@ -95,5 +95,9 @@ app.get('/api/data', async (req, res) => {
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
+const path = require('path');
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html')); // Hãy đổi 'index.html' thành tên file HTML của bạn nếu đặt tên khác
+});
 
 app.listen(PORT, () => console.log('Server is running...'));
