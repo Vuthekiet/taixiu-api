@@ -3,51 +3,58 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MD5 PRO v3.0 | Quantum Predictor</title>
+    <title>MD5 PRO v3.4 | Hybrid Engine</title>
     <style>
         :root { --bg: #050505; --card: #111; --accent: #00ff88; --tai: #00ff88; --xiu: #ff3e3e; --text: #eee; }
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', -apple-system, sans-serif; }
         body { background: var(--bg); color: var(--text); display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 15px; }
         .app { width: 100%; max-width: 450px; }
         
-        header { text-align: center; margin-bottom: 25px; }
+        header { text-align: center; margin-bottom: 20px; }
         header h1 { font-size: 1.2rem; letter-spacing: 4px; color: var(--accent); opacity: 0.8; }
         
-        .card { background: var(--card); border-radius: 20px; padding: 25px; margin-bottom: 20px; border: 1px solid #222; }
-        .main-card { text-align: center; border: 1px solid var(--accent); box-shadow: 0 0 40px rgba(0, 255, 136, 0.1); position: relative; overflow: hidden; }
-        .main-card::after { content: 'V3.0'; position: absolute; top: 10px; right: 10px; font-size: 0.6rem; color: var(--accent); border: 1px solid var(--accent); padding: 2px 5px; border-radius: 4px; }
+        .card { background: var(--card); border-radius: 20px; padding: 25px; margin-bottom: 15px; border: 1px solid #222; }
+        .main-card { text-align: center; border: 1px solid var(--accent); box-shadow: 0 0 40px rgba(0, 255, 136, 0.1); position: relative; }
         
-        .label { font-size: 0.7rem; text-transform: uppercase; color: #666; letter-spacing: 2px; margin-bottom: 10px; }
-        .value { font-size: 3rem; font-weight: 900; margin: 10px 0; text-shadow: 0 0 20px currentColor; }
+        .label { font-size: 0.7rem; text-transform: uppercase; color: #666; letter-spacing: 2px; margin-bottom: 8px; }
+        .value { font-size: 3rem; font-weight: 900; margin: 5px 0; text-shadow: 0 0 20px currentColor; }
         .tai { color: var(--tai); }
         .xiu { color: var(--xiu); }
         
-        .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 20px; }
-        .info-item { background: #181818; padding: 15px; border-radius: 12px; text-align: center; }
-        .info-val { font-size: 1.2rem; font-weight: 700; color: var(--accent); }
+        .md5-input-group { margin-top: 15px; }
+        .md5-input { width: 100%; background: #181818; border: 1px solid #333; border-radius: 10px; padding: 12px; color: var(--accent); font-size: 0.8rem; text-align: center; outline: none; transition: 0.3s; }
+        .md5-input:focus { border-color: var(--accent); box-shadow: 0 0 10px rgba(0, 255, 136, 0.2); }
+        
+        .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 15px; }
+        .info-item { background: #181818; padding: 12px; border-radius: 12px; text-align: center; }
+        .info-val { font-size: 1.1rem; font-weight: 700; color: var(--accent); }
         
         .history { margin-top: 10px; }
-        .hist-row { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #181818; font-size: 0.85rem; }
-        .status { font-weight: bold; width: 50px; text-align: right; }
+        .hist-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #181818; font-size: 0.8rem; }
+        .status { font-weight: bold; width: 45px; text-align: right; }
         .win { color: var(--tai); }
         .lose { color: var(--xiu); }
 
-        .dices { display: flex; justify-content: center; gap: 10px; margin-bottom: 15px; }
-        .dice { width: 35px; height: 35px; background: #222; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-weight: bold; border: 1px solid #333; }
+        .dices { display: flex; justify-content: center; gap: 8px; margin-bottom: 10px; }
+        .dice { width: 30px; height: 30px; background: #222; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-weight: bold; border: 1px solid #333; font-size: 0.9rem; }
         
-        .progress-container { width: 100%; height: 4px; background: #222; border-radius: 2px; margin-top: 15px; overflow: hidden; }
+        .progress-container { width: 100%; height: 4px; background: #222; border-radius: 2px; margin-top: 10px; overflow: hidden; }
         .progress-bar { height: 100%; background: var(--accent); transition: width 0.5s ease; }
     </style>
 </head>
 <body>
     <div class="app">
-        <header><h1>QUANTUM ENGINE</h1></header>
+        <header><h1>HYBRID ENGINE v3.4</h1></header>
 
         <div class="card main-card">
             <div class="label">Phiên kế tiếp <span id="nextId">...</span></div>
             <div id="prediction" class="value">...</div>
-            <div id="logic" style="font-size: 0.85rem; color: var(--accent); font-weight: 600;">Khởi động Engine...</div>
+            <div id="logic" style="font-size: 0.8rem; color: var(--accent); font-weight: 600;">Dò cầu & mã hash...</div>
             <div class="progress-container"><div id="confBar" class="progress-bar" style="width: 0%"></div></div>
+            
+            <div class="md5-input-group">
+                <input type="text" id="md5Input" class="md5-input" placeholder="Dán mã MD5 phiên mới vào đây..." oninput="analyzeMD5()">
+            </div>
         </div>
 
         <div class="card">
@@ -73,21 +80,44 @@
     </div>
 
     <script>
+        let isManualMD5 = false;
+
+        async function analyzeMD5() {
+            const md5 = document.getElementById('md5Input').value;
+            if (md5.length >= 32) {
+                isManualMD5 = true;
+                const r = await fetch('/api/predict-md5', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ md5 })
+                });
+                const d = await r.json();
+                updateUI(d);
+            } else {
+                isManualMD5 = false;
+            }
+        }
+
+        function updateUI(data) {
+            const p = document.getElementById('prediction');
+            p.innerText = data.side || data.next.side;
+            p.className = 'value ' + ((data.side || data.next.side) === 'Tài' ? 'tai' : 'xiu');
+            
+            document.getElementById('logic').innerText = (data.logic || data.next.logic).toUpperCase();
+            document.getElementById('conf').innerText = (data.conf || data.next.conf) + '%';
+            document.getElementById('confBar').style.width = (data.conf || data.next.conf) + '%';
+        }
+
         async function refresh() {
+            if (isManualMD5) return;
             try {
                 const r = await fetch('/api/data');
                 const d = await r.json();
                 
                 document.getElementById('nextId').innerText = d.next.phien;
-                const p = document.getElementById('prediction');
-                p.innerText = d.next.side;
-                p.className = 'value ' + (d.next.side === 'Tài' ? 'tai' : 'xiu');
+                updateUI(d);
                 
-                document.getElementById('logic').innerText = d.next.logic.toUpperCase();
-                document.getElementById('conf').innerText = d.next.conf + '%';
-                document.getElementById('confBar').style.width = d.next.conf + '%';
                 document.getElementById('winRate').innerText = d.stats.winRate + '%';
-                
                 const dices = document.getElementById('dices');
                 dices.innerHTML = d.current.dices.map(v => `<div class="dice">${v}</div>`).join('');
                 
