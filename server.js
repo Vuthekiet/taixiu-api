@@ -7,73 +7,71 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json());
 app.use(express.static(__dirname));
 
-let eternalHistory = []; 
+let diceHistory = []; 
 let predictionHistory = [];
 let currentPhase = 0;
 
 /**
- * MD5 DECODER ENGINE
- * Phân tích đặc tính chuỗi Hash để tìm quy luật Salt
+ * ENGINE V4.0 - DICE PHYSICS & MD5 HYBRID
+ * Loại bỏ soi cầu, tập trung vào xác suất điểm số 3 viên xúc xắc
  */
-function analyzeMD5(hash) {
-    if (!hash || hash.length < 32) return null;
+function analyzeDicePhysics(sessions, userMD5 = null) {
+    if (sessions.length < 5) return { pred: -1, conf: 0, logic: "Đang nạp dữ liệu..." };
+
+    const latest = sessions[sessions.length - 1];
+    const dices = latest.dices; // [v1, v2, v3]
+    const point = latest.point;
+
+    // --- LOGIC 1: DICE CORRELATION (Tương quan điểm số) ---
+    let dicePred = -1;
+    let diceConf = 0;
     
-    // Thuật toán phân tích đặc trưng MD5 (Dựa trên tổng giá trị ASCII của 4 ký tự cuối)
-    const last4 = hash.slice(-4);
-    let score = 0;
-    for (let i = 0; i < 4; i++) score += last4.charCodeAt(i);
+    // Quy luật bù trừ (Law of Large Numbers)
+    // Nếu phiên trước có mặt 6 xuất hiện nhiều -> Phiên sau xu hướng về Xỉu cao hơn
+    const count6 = dices.filter(v => v === 6).length;
+    const count1 = dices.filter(v => v === 1).length;
     
-    // Quy luật xác suất: Nếu score chẵn thường về Xỉu, lẻ thường về Tài (Đây là một bộ lọc bổ trợ)
-    return score % 2 === 0 ? 0 : 1;
-}
+    if (count6 >= 2) { dicePred = 0; diceConf = 85; } // 2 con 6 -> Khả năng cao hồi Xỉu
+    else if (count1 >= 2) { dicePred = 1; diceConf = 85; } // 2 con 1 -> Khả năng cao hồi Tài
+    
+    // Logic điểm cực trị
+    if (point <= 5) { dicePred = 1; diceConf = 95; }
+    else if (point >= 16) { dicePred = 0; diceConf = 95; }
 
-function engineV3(sessions, userMD5 = null) {
-    if (sessions.length < 10) return { pred: -1, conf: 0, logic: "Đang nạp..." };
+    // --- LOGIC 2: MD5 DECODER ---
+    let md5Pred = -1;
+    if (userMD5 && userMD5.length >= 32) {
+        const last4 = userMD5.slice(-4);
+        let sum = 0;
+        for (let i = 0; i < 4; i++) sum += last4.charCodeAt(i);
+        md5Pred = sum % 2 === 0 ? 0 : 1;
+    }
 
-    const pts = sessions.map(s => s.point);
-    const res = sessions.map(s => s.resultTruyenThong === 'TAI' ? 1 : 0);
-    const lastResult = res[res.length - 1];
+    // --- HYBRID DECISION ---
+    let finalPred = dicePred;
+    let finalConf = diceConf || 70;
+    let logic = "Phân tích điểm xúc xắc";
 
-    // --- ENGINE 1: TREND (Cầu) ---
-    let trendPred = -1;
-    const sStr = res.slice(-5).join('');
-    if (sStr.endsWith('1010')) trendPred = 1; // Cầu 1-1 -> Đánh Tài
-    else if (sStr.endsWith('0101')) trendPred = 0; // Cầu 1-1 -> Đánh Xỉu
-    else if (sStr.endsWith('111')) trendPred = 1; // Bệt Tài
-    else if (sStr.endsWith('000')) trendPred = 0; // Bệt Xỉu
-
-    // --- ENGINE 2: MD5 HYBRID ---
-    let md5Pred = analyzeMD5(userMD5);
-
-    // --- VOTING SYSTEM ---
-    let finalPred = trendPred;
-    let confidence = 75;
-    let logic = "Phân tích xu hướng";
-
-    if (md5Pred !== null) {
-        if (md5Pred === trendPred) {
-            confidence = 98;
-            logic = "HYBRID: Cầu & Mã đồng thuận";
-        } else if (trendPred === -1) {
+    if (md5Pred !== -1) {
+        if (md5Pred === dicePred) {
+            finalConf = 98;
+            logic = "ĐỒNG THUẬN: Điểm & Mã Hash";
+        } else if (dicePred === -1) {
             finalPred = md5Pred;
-            confidence = 85;
-            logic = "MD5: Phân tích mã Hash";
+            finalConf = 88;
+            logic = "MD5: Giải mã mã Hash";
         } else {
-            confidence = 60;
-            logic = "Cảnh báo: Cầu & Mã ngược nhau";
+            finalConf = 55;
+            logic = "CẢNH BÁO: Điểm & Mã ngược nhau";
         }
     }
 
-    return { 
-        pred: finalPred, 
-        conf: Math.min(Math.round(confidence), 99), 
-        logic: logic
-    };
+    return { pred: finalPred, conf: finalConf, logic: logic };
 }
 
 app.post('/api/predict-md5', (req, res) => {
     const { md5 } = req.body;
-    const analysis = engineV3(eternalHistory, md5);
+    const analysis = analyzeDicePhysics(diceHistory, md5);
     res.json({
         phien: currentPhase + 1,
         side: analysis.pred === 1 ? 'Tài' : (analysis.pred === 0 ? 'Xỉu' : 'N/A'),
@@ -90,7 +88,7 @@ app.get('/api/data', async (req, res) => {
         );
         const list = response.data.list;
         const latest = list[0];
-        eternalHistory = [...list].reverse(); 
+        diceHistory = [...list].reverse();
         
         if (currentPhase !== latest.id) {
             currentPhase = latest.id;
@@ -99,7 +97,7 @@ app.get('/api/data', async (req, res) => {
                 last.real = latest.resultTruyenThong === 'TAI' ? 'Tài' : 'Xỉu';
                 last.win = (last.side === last.real);
             }
-            const analysis = engineV3(eternalHistory);
+            const analysis = analyzeDicePhysics(diceHistory);
             predictionHistory.unshift({
                 phien: latest.id + 1,
                 side: analysis.pred === 1 ? 'Tài' : (analysis.pred === 0 ? 'Xỉu' : 'N/A'),
@@ -126,4 +124,4 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-app.listen(PORT, () => console.log('Engine V3.4 Hybrid MD5 Online'));
+app.listen(PORT, () => console.log('Engine V4.0 Dice Analytics Online'));
