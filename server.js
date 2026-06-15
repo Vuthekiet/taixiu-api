@@ -200,9 +200,9 @@ function predictNextResult(sessions) {
 }
 
 // ==========================================
-// API ENDPOINT
+// API ENDPOINTS
 // ==========================================
-app.get("/api/data", async (req, res) => {
+app.get("/api/taixiu", async (req, res) => {
     try {
         const response = await axios.get(
             "https://wtxmd52.tele68.com/v1/txmd5/lite-sessions?cp=R&cl=R&pf=web&at=910a2c78e3eb1137d7ef50c8ddea98d2",
@@ -256,6 +256,7 @@ app.get("/api/data", async (req, res) => {
             }
         });
     } catch (error) {
+        console.error("API Error:", error.message);
         res.status(500).json({ error: error.message });
     }
 });
@@ -553,6 +554,7 @@ app.get("/", (req, res) => {
             width: 100%;
             border-collapse: collapse;
             margin-top: 20px;
+            overflow-x: auto;
         }
         
         .history-table th {
@@ -710,7 +712,7 @@ app.get("/", (req, res) => {
     <script>
         async function updateDashboard() {
             try {
-                const response = await fetch('/api/data');
+                const response = await fetch('/api/taixiu');
                 const data = await response.json();
                 
                 // Cập nhật phiên hiện tại
@@ -813,6 +815,12 @@ app.get("/", (req, res) => {
     `);
 });
 
+// Error handling
+app.use((err, req, res, next) => {
+    console.error(err);
+    res.status(500).json({ error: "Internal Server Error" });
+});
+
 app.listen(PORT, () => {
-    console.log(`✅ Tài Xỉu Predictor Dashboard running on http://localhost:${PORT}`);
+    console.log(`✅ Tài Xỉu Predictor Dashboard running on port ${PORT}`);
 });
