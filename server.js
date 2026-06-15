@@ -220,14 +220,23 @@ app.get("/api/taixiu", async (req, res) => {
             sessionHistory.unshift(latest);
             sessionHistory = sessionHistory.slice(0, 100);
             
-            // Dự đoán phiên tiếp theo
+            // Dự đoán phiên tiếp theo (N+1)
             const prediction = predictNextResult(sessions);
+            
+            // Nếu có phiên trước đó trong lịch sử, kiểm tra dự đoán trước có đúng không
+            if (predictionHistory.length > 0) {
+                const lastPrediction = predictionHistory[0];
+                lastPrediction.ketQua = latest.resultTruyenThong === 'TAI' ? "Tài" : "Xỉu";
+                lastPrediction.dung = (lastPrediction.duDoan === "Tài" && latest.resultTruyenThong === 'TAI') ||
+                                     (lastPrediction.duDoan === "Xỉu" && latest.resultTruyenThong === 'XIU');
+            }
+            
+            // Thêm dự đoán mới cho phiên tiếp theo
             predictionHistory.unshift({
-                phien: latest.id,
+                phien: latest.id + 1,
                 duDoan: prediction.pred === 1 ? "Tài" : "Xỉu",
-                ketQua: latest.resultTruyenThong === 'TAI' ? "Tài" : "Xỉu",
-                dung: (prediction.pred === 1 && latest.resultTruyenThong === 'TAI') ||
-                      (prediction.pred === 0 && latest.resultTruyenThong === 'XIU'),
+                ketQua: null,
+                dung: null,
                 doTinCay: prediction.conf,
                 logic: prediction.logic,
                 timestamp: new Date().toISOString()
@@ -774,18 +783,21 @@ app.get("/", (req, res) => {
                     \`;
                     
                     data.predictionHistory.forEach(pred => {
+                        // Chi hien thi du doan da xay ra (co ket qua)
+                        if (pred.ketQua === null) return;
+                        
                         const statusClass = pred.dung ? 'status-win' : 'status-lose';
                         const statusText = pred.dung ? '✓ THẮNG' : '✗ THUA';
-                        html += \`
+                        html += `
                             <tr>
-                                <td>#\${pred.phien}</td>
-                                <td>\${pred.duDoan}</td>
-                                <td>\${pred.ketQua}</td>
-                                <td class="\${statusClass}">\${statusText}</td>
-                                <td>\${pred.doTinCay}%</td>
-                                <td style="font-size: 11px; color: #aaa;">\${pred.logic}</td>
+                                <td>#${pred.phien}</td>
+                                <td>${pred.duDoan}</td>
+                                <td>${pred.ketQua}</td>
+                                <td class="${statusClass}">${statusText}</td>
+                                <td>${pred.doTinCay}%</td>
+                                <td style="font-size: 11px; color: #aaa;">${pred.logic}</td>
                             </tr>
-                        \`;
+                        `;
                     });
                     
                     html += \`
