@@ -3,119 +3,120 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MD5 PRO v3.4 | Hybrid Engine</title>
+    <title>MD5 PRO v4.0 | Dice Analytics</title>
     <style>
-        :root { --bg: #050505; --card: #111; --accent: #00ff88; --tai: #00ff88; --xiu: #ff3e3e; --text: #eee; }
-        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', -apple-system, sans-serif; }
-        body { background: var(--bg); color: var(--text); display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 15px; }
-        .app { width: 100%; max-width: 450px; }
+        :root { --bg: #080808; --card: #121212; --accent: #00e676; --tai: #00e676; --xiu: #ff5252; --text: #f0f0f0; }
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Roboto, sans-serif; }
+        body { background: var(--bg); color: var(--text); display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 10px; }
+        .app { width: 100%; max-width: 420px; }
         
-        header { text-align: center; margin-bottom: 20px; }
-        header h1 { font-size: 1.2rem; letter-spacing: 4px; color: var(--accent); opacity: 0.8; }
+        header { text-align: center; margin-bottom: 15px; border-bottom: 1px solid #222; padding-bottom: 10px; }
+        header h1 { font-size: 1rem; letter-spacing: 3px; color: var(--accent); font-weight: 800; }
         
-        .card { background: var(--card); border-radius: 20px; padding: 25px; margin-bottom: 15px; border: 1px solid #222; }
-        .main-card { text-align: center; border: 1px solid var(--accent); box-shadow: 0 0 40px rgba(0, 255, 136, 0.1); position: relative; }
+        .card { background: var(--card); border-radius: 16px; padding: 20px; margin-bottom: 12px; border: 1px solid #1f1f1f; }
+        .main-card { text-align: center; border: 1px solid rgba(0, 230, 118, 0.3); background: linear-gradient(145deg, #121212, #0a0a0a); }
         
-        .label { font-size: 0.7rem; text-transform: uppercase; color: #666; letter-spacing: 2px; margin-bottom: 8px; }
-        .value { font-size: 3rem; font-weight: 900; margin: 5px 0; text-shadow: 0 0 20px currentColor; }
-        .tai { color: var(--tai); }
-        .xiu { color: var(--xiu); }
+        .label { font-size: 0.65rem; text-transform: uppercase; color: #888; letter-spacing: 1.5px; margin-bottom: 5px; }
+        .value { font-size: 3.5rem; font-weight: 900; margin: 0; line-height: 1; }
+        .tai { color: var(--tai); text-shadow: 0 0 30px rgba(0, 230, 118, 0.4); }
+        .xiu { color: var(--xiu); text-shadow: 0 0 30px rgba(255, 82, 82, 0.4); }
         
-        .md5-input-group { margin-top: 15px; }
-        .md5-input { width: 100%; background: #181818; border: 1px solid #333; border-radius: 10px; padding: 12px; color: var(--accent); font-size: 0.8rem; text-align: center; outline: none; transition: 0.3s; }
-        .md5-input:focus { border-color: var(--accent); box-shadow: 0 0 10px rgba(0, 255, 136, 0.2); }
+        .md5-section { margin-top: 15px; padding-top: 15px; border-top: 1px solid #222; }
+        .md5-input { width: 100%; background: #000; border: 1px solid #333; border-radius: 8px; padding: 10px; color: var(--accent); font-size: 0.75rem; text-align: center; font-family: monospace; outline: none; }
+        .md5-input:focus { border-color: var(--accent); }
         
-        .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 15px; }
-        .info-item { background: #181818; padding: 12px; border-radius: 12px; text-align: center; }
-        .info-val { font-size: 1.1rem; font-weight: 700; color: var(--accent); }
+        .dice-display { display: flex; justify-content: center; gap: 12px; margin: 15px 0; }
+        .dice { width: 40px; height: 40px; background: #1a1a1a; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: 800; border: 2px solid #333; font-size: 1.2rem; color: #fff; }
         
-        .history { margin-top: 10px; }
-        .hist-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #181818; font-size: 0.8rem; }
-        .status { font-weight: bold; width: 45px; text-align: right; }
-        .win { color: var(--tai); }
-        .lose { color: var(--xiu); }
-
-        .dices { display: flex; justify-content: center; gap: 8px; margin-bottom: 10px; }
-        .dice { width: 30px; height: 30px; background: #222; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-weight: bold; border: 1px solid #333; font-size: 0.9rem; }
+        .stats-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .stat-box { background: #1a1a1a; padding: 10px; border-radius: 10px; text-align: center; border: 1px solid #222; }
+        .stat-val { font-size: 1.1rem; font-weight: 700; color: var(--accent); }
         
-        .progress-container { width: 100%; height: 4px; background: #222; border-radius: 2px; margin-top: 10px; overflow: hidden; }
-        .progress-bar { height: 100%; background: var(--accent); transition: width 0.5s ease; }
+        .history-list { margin-top: 5px; }
+        .history-item { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #1a1a1a; font-size: 0.75rem; align-items: center; }
+        .res-tag { padding: 2px 8px; border-radius: 4px; font-weight: 800; font-size: 0.7rem; }
+        .tag-tai { background: rgba(0, 230, 118, 0.1); color: var(--tai); }
+        .tag-xiu { background: rgba(255, 82, 82, 0.1); color: var(--xiu); }
+        
+        .logic-text { font-size: 0.7rem; color: var(--accent); font-weight: 700; margin-top: 8px; letter-spacing: 1px; }
+        .win-indicator { color: #00e676; font-weight: 900; }
+        .lose-indicator { color: #ff5252; font-weight: 900; }
     </style>
 </head>
 <body>
     <div class="app">
-        <header><h1>HYBRID ENGINE v3.4</h1></header>
+        <header><h1>DICE ANALYTICS v4.0</h1></header>
 
         <div class="card main-card">
-            <div class="label">Phiên kế tiếp <span id="nextId">...</span></div>
+            <div class="label">Phiên tiếp theo <span id="nextId">...</span></div>
             <div id="prediction" class="value">...</div>
-            <div id="logic" style="font-size: 0.8rem; color: var(--accent); font-weight: 600;">Dò cầu & mã hash...</div>
-            <div class="progress-container"><div id="confBar" class="progress-bar" style="width: 0%"></div></div>
+            <div id="logic" class="logic-text">ĐANG PHÂN TÍCH XÚC XẮC...</div>
             
-            <div class="md5-input-group">
-                <input type="text" id="md5Input" class="md5-input" placeholder="Dán mã MD5 phiên mới vào đây..." oninput="analyzeMD5()">
+            <div class="md5-section">
+                <div class="label" style="margin-bottom:8px">Nhập mã MD5 phiên mới</div>
+                <input type="text" id="md5Input" class="md5-input" placeholder="Dán mã Hash tại đây..." oninput="handleMD5()">
             </div>
         </div>
 
         <div class="card">
-            <div class="dices" id="dices">
-                <div class="dice">-</div><div class="dice">-</div><div class="dice">-</div>
+            <div class="label">Kết quả phiên vừa rồi</div>
+            <div class="dice-display" id="dices">
+                <div class="dice">?</div><div class="dice">?</div><div class="dice">?</div>
             </div>
-            <div class="info-grid">
-                <div class="info-item">
-                    <div class="label">Độ tin cậy</div>
-                    <div class="info-val" id="conf">0%</div>
+            <div class="stats-row">
+                <div class="stat-box">
+                    <div class="label">Tin cậy</div>
+                    <div class="stat-val" id="conf">0%</div>
                 </div>
-                <div class="info-item">
+                <div class="stat-box">
                     <div class="label">Win Rate</div>
-                    <div class="info-val" id="winRate">0%</div>
+                    <div class="stat-val" id="winRate">0%</div>
                 </div>
             </div>
         </div>
 
         <div class="card">
             <div class="label">Lịch sử phân tích</div>
-            <div class="history" id="history"></div>
+            <div class="history-list" id="history"></div>
         </div>
     </div>
 
     <script>
-        let isManualMD5 = false;
+        let manualMode = false;
 
-        async function analyzeMD5() {
-            const md5 = document.getElementById('md5Input').value;
-            if (md5.length >= 32) {
-                isManualMD5 = true;
+        async function handleMD5() {
+            const val = document.getElementById('md5Input').value;
+            if (val.length >= 32) {
+                manualMode = true;
                 const r = await fetch('/api/predict-md5', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ md5 })
+                    body: JSON.stringify({ md5: val })
                 });
                 const d = await r.json();
-                updateUI(d);
+                renderPrediction(d);
             } else {
-                isManualMD5 = false;
+                manualMode = false;
             }
         }
 
-        function updateUI(data) {
+        function renderPrediction(data) {
             const p = document.getElementById('prediction');
-            p.innerText = data.side || data.next.side;
-            p.className = 'value ' + ((data.side || data.next.side) === 'Tài' ? 'tai' : 'xiu');
-            
+            const side = data.side || data.next.side;
+            p.innerText = side;
+            p.className = 'value ' + (side === 'Tài' ? 'tai' : 'xiu');
             document.getElementById('logic').innerText = (data.logic || data.next.logic).toUpperCase();
             document.getElementById('conf').innerText = (data.conf || data.next.conf) + '%';
-            document.getElementById('confBar').style.width = (data.conf || data.next.conf) + '%';
         }
 
         async function refresh() {
-            if (isManualMD5) return;
+            if (manualMode) return;
             try {
                 const r = await fetch('/api/data');
                 const d = await r.json();
                 
                 document.getElementById('nextId').innerText = d.next.phien;
-                updateUI(d);
+                renderPrediction(d);
                 
                 document.getElementById('winRate').innerText = d.stats.winRate + '%';
                 const dices = document.getElementById('dices');
@@ -123,11 +124,11 @@
                 
                 const hist = document.getElementById('history');
                 hist.innerHTML = d.history.map(h => `
-                    <div class="hist-row">
-                        <span style="color:#666">#${h.phien}</span>
-                        <span class="${h.side === 'Tài' ? 'tai' : 'xiu'}" style="font-weight:700">${h.side}</span>
-                        <span style="opacity:0.6">${h.real || '...'}</span>
-                        <span class="status ${h.win ? 'win' : 'lose'}">${h.win === null ? '' : (h.win ? 'WIN' : 'LOSE')}</span>
+                    <div class="history-item">
+                        <span style="color:#555">#${h.phien}</span>
+                        <span class="res-tag ${h.side === 'Tài' ? 'tag-tai' : 'tag-xiu'}">${h.side}</span>
+                        <span style="opacity:0.5">${h.real || '...'}</span>
+                        <span class="${h.win ? 'win-indicator' : 'lose-indicator'}">${h.win === null ? '' : (h.win ? '●' : '○')}</span>
                     </div>
                 `).join('');
             } catch (e) {}
