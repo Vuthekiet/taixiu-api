@@ -1,6 +1,4 @@
-flask==3.0.3
-gunicorn==22.0.0
-python-telegram-bot==20.8
-httpx==0.25.2
-httpcore==1.0.2
-nest-asyncio==1.6.0
+flask
+gunicorn
+python-telegram-bot==20.7
+nest-asyncio
