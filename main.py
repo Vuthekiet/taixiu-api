@@ -23,7 +23,7 @@ from telegram.ext import (
 )
 
 # -------------------- CẤU HÌNH CỨNG BUỘC --------------------
-BOT_TOKEN = "8931512528:AAE9CC1Kw_xRFO6QYJkQI6Su60dA7I0cDlQ"          # <-- Thay bằng token thực của bạn
+BOT_TOKEN = "8671164366:AAER5O_pyBWG_hhG8IUortHYX5oJ8bzMAWM"          # <-- Thay bằng token thực của bạn
 ADMIN_ID =   8284419367                # <-- Thay bằng ID admin thực của bạn
 
 # -------------------- CẤU HÌNH DATABASE --------------------
