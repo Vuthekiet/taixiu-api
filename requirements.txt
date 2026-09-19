@@ -1,4 +1,5 @@
 flask
 gunicorn
-python-telegram-bot==20.7
+python-telegram-bot
 nest-asyncio
+requests
